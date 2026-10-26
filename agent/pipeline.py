@@ -31,7 +31,6 @@ class VoicePipelineAgent:
         from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
         from pipecat.processors.audio.vad_processor import VADProcessor
         from pipecat.services.deepgram.stt import DeepgramSTTService
-        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
         from pipecat.services.openai.llm import OpenAILLMService
         from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 
@@ -52,9 +51,7 @@ class VoicePipelineAgent:
         llm = OpenAILLMService(api_key=Config.OPENROUTER_API_KEY,
                                base_url=Config.OPENROUTER_BASE_URL,
                                settings=OpenAILLMService.Settings(model=Config.FAST_MODEL))
-        tts = ElevenLabsTTSService(api_key=Config.TTS_API_KEY,
-                                   settings=ElevenLabsTTSService.Settings(
-                                       voice=Config.TTS_VOICE_ID, model=Config.TTS_MODEL))
+        tts = self._make_tts_service(transport_sample_rate=24000)
 
         system = {
             "role": "system",
@@ -150,3 +147,24 @@ class VoicePipelineAgent:
                 return await self._inner._build_website(request)
 
         return _Host(self.coordinator)
+
+    def _make_tts_service(self, transport_sample_rate: int):
+        """Build the streaming TTS service for the live audio path (provider from env)."""
+        from pipecat.services.deepgram.tts import DeepgramTTSService
+        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+        if Config.TTS_PROVIDER == "deepgram":
+            if not Config.ASR_API_KEY:
+                raise SystemExit("TTS_PROVIDER=deepgram needs ASR_API_KEY (one Deepgram account for ASR+TTS)")
+            return DeepgramTTSService(
+                api_key=Config.ASR_API_KEY,
+                sample_rate=transport_sample_rate,
+                settings=DeepgramTTSService.Settings(voice=Config.TTS_MODEL))
+        if Config.TTS_PROVIDER == "elevenlabs":
+            if not Config.TTS_API_KEY:
+                raise SystemExit("TTS_PROVIDER=elevenlabs needs TTS_API_KEY (paid plan: library voices need a paid subscription)")
+            return ElevenLabsTTSService(
+                api_key=Config.TTS_API_KEY,
+                settings=ElevenLabsTTSService.Settings(
+                    voice=Config.TTS_VOICE_ID, model=Config.TTS_MODEL))
+        raise SystemExit(f"unsupported TTS_PROVIDER {Config.TTS_PROVIDER!r} — use deepgram or elevenlabs")

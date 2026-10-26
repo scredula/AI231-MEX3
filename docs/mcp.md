@@ -5,7 +5,7 @@ Custom MCP servers (all run fine on the Pi — stdio transport, no ports needed)
 | Server | Tools | Provider/config |
 |---|---|---|
 | `mcp_servers/asr_server.py` | `transcribe(wav_b64, sample_rate, channels, language)` | Deepgram or OpenAI via `ASR_PROVIDER`, `ASR_API_KEY` |
-| `mcp_servers/tts_server.py` | `speak(text, voice_settings) -> base64 MP3` | ElevenLabs or OpenAI via `TTS_PROVIDER`, `TTS_API_KEY` |
+| `mcp_servers/tts_server.py` | `speak(text, voice_settings) -> base64 MP3` | Deepgram (Aura-2, uses `ASR_API_KEY`), ElevenLabs (paid plan needed for library voices) or OpenAI via `TTS_PROVIDER` |
 | `mcp_servers/task_server.py` | `task_status`, `task_list`, `task_cancel` | shares `TASKS_DB_PATH` with the coordinator |
 | `mcp_servers/tools_server.py` | `list_dir`, `read_file`, `write_file`, `run_command` | workspace-confined + allowlist (`coding_agent/policies.py`) |
 

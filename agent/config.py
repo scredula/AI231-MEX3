@@ -28,10 +28,10 @@ class Config:
     ASR_MODEL = _env("ASR_MODEL", "nova-3")
 
     # TTS
-    TTS_PROVIDER = _env("TTS_PROVIDER", "elevenlabs")
+    TTS_PROVIDER = _env("TTS_PROVIDER", "deepgram")  # deepgram (uses ASR_API_KEY) | elevenlabs | openai
     TTS_API_KEY = _env("TTS_API_KEY")
     TTS_VOICE_ID = _env("TTS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
-    TTS_MODEL = _env("TTS_MODEL", "eleven_turbo_v2_5")
+    TTS_MODEL = _env("TTS_MODEL", "aura-2-thalia-en")  # deepgram aura voice name; elevenlabs model id when TTS_PROVIDER=elevenlabs
 
     # GitHub
     GITHUB_TOKEN = _env("GITHUB_TOKEN")

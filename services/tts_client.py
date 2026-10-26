@@ -60,7 +60,33 @@ class OpenAITTS:
             return r.content
 
 
+class DeepgramTTS:
+    """Deepgram Aura-2 REST TTS. Model name carries the voice (e.g. aura-2-thalia-en)."""
+
+    def __init__(self, api_key: str = None, model: str = None):
+        self.api_key = api_key or Config.ASR_API_KEY  # same Deepgram account as ASR
+        self.model = model or Config.TTS_MODEL
+
+    async def speak(self, text: str, voice_settings: dict = None) -> bytes:
+        if not self.api_key:
+            raise TTSError("ASR_API_KEY not configured (Deepgram TTS uses the Deepgram account)")
+        if not text or len(text) > 2000:
+            raise TTSError("text must be 1..2000 characters")
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post("https://api.deepgram.com/v1/speak",
+                                  params={"model": self.model},
+                                  headers={"Authorization": f"Token {self.api_key}",
+                                           "Content-Type": "application/json",
+                                           "Accept": "audio/mpeg"},
+                                  json={"text": text})
+            if r.status_code != 200:
+                raise TTSError(f"Deepgram error {r.status_code}: {r.text[:200]}")
+            return r.content
+
+
 def get_tts():
     if Config.TTS_PROVIDER == "openai":
         return OpenAITTS()
+    if Config.TTS_PROVIDER == "deepgram":
+        return DeepgramTTS()
     return ElevenLabsTTS()
