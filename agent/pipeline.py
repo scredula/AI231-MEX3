@@ -126,7 +126,7 @@ class VoicePipelineAgent:
         self.coordinator.on_announce(announce)
 
         runner = WorkerRunner()
-        await runner.add_workers([worker])
+        await runner.add_workers(worker)
         await runner.run()
 
     def _make_tool_host(self):
