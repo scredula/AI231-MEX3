@@ -90,8 +90,11 @@ class VoicePipelineAgent:
                 "You are a friendly assistant running on a Raspberry Pi 5. Keep spoken answers "
                 "short (1-3 sentences). You can delegate coding/build jobs to a background agent "
                 "with submit_task and check on them with task_status. For the current time, use "
-                "get_time. Never publish anything to GitHub unless the user explicitly approves "
-                "in this conversation."
+                "get_time; for current events or weather, use search_web and summarize the "
+                "results in one or two spoken sentences. For quick scripts or one-file fixes, "
+                "use create_file, edit_file, read_file and run_command yourself; leave bigger "
+                "multi-step builds to the background agent with submit_task. Never publish "
+                "anything to GitHub unless the user explicitly approves in this conversation."
             ),
         }
 
@@ -136,7 +139,69 @@ class VoicePipelineAgent:
             import datetime
             await params.result_callback(datetime.datetime.now().strftime("%A, %d %B %Y, %H:%M:%S"))
 
-        context = LLMContext([system], tools=[submit_task, task_status, task_cancel, build_website, get_time])
+        async def search_web(params: FunctionCallParams, query: str) -> None:
+            """Search the web for current information (news, weather, prices, facts).
+
+            Args:
+                query: The search query.
+            """
+            import asyncio as _aio
+            from services.websearch import search_web as _search
+            result = await _aio.get_event_loop().run_in_executor(None, _search, query)
+            await params.result_callback(result)
+
+        workspace_tools = self._make_workspace_tools()
+
+        async def create_file(params: FunctionCallParams, path: str, content: str) -> None:
+            """Create a file in the workspace (relative path only).
+
+            Args:
+                path: Workspace-relative file path.
+                content: Full text content of the file.
+            """
+            import asyncio as _aio
+            result = await _aio.get_event_loop().run_in_executor(
+                None, workspace_tools.create_file, path, content)
+            await params.result_callback(result)
+
+        async def edit_file(params: FunctionCallParams, path: str, old_text: str, new_text: str) -> None:
+            """Replace one exact occurrence of old_text with new_text in a workspace file.
+
+            Args:
+                path: Workspace-relative file path.
+                old_text: Exact text to find (must be unique in the file).
+                new_text: Replacement text.
+            """
+            import asyncio as _aio
+            result = await _aio.get_event_loop().run_in_executor(
+                None, workspace_tools.edit_file, path, old_text, new_text)
+            await params.result_callback(result)
+
+        async def read_file(params: FunctionCallParams, path: str) -> None:
+            """Read a text file from the workspace.
+
+            Args:
+                path: Workspace-relative file path.
+            """
+            import asyncio as _aio
+            result = await _aio.get_event_loop().run_in_executor(
+                None, workspace_tools.read_file, path)
+            await params.result_callback(result)
+
+        async def run_command(params: FunctionCallParams, command: str) -> None:
+            """Run an allowlisted shell command (python, pip, git, file tools) in the workspace.
+
+            Args:
+                command: The shell command to run.
+            """
+            import asyncio as _aio
+            result = await _aio.get_event_loop().run_in_executor(
+                None, workspace_tools.run_command, command)
+            await params.result_callback(result)
+
+        context = LLMContext([system], tools=[submit_task, task_status, task_cancel, build_website,
+                                              get_time, search_web, create_file, edit_file,
+                                              read_file, run_command])
         aggregators = LLMContextAggregatorPair(context)
 
         pipeline = Pipeline([
@@ -210,6 +275,10 @@ class VoicePipelineAgent:
                 settings=ElevenLabsTTSService.Settings(
                     voice=Config.TTS_VOICE_ID, model=Config.TTS_MODEL))
         raise SystemExit(f"unsupported TTS_PROVIDER {Config.TTS_PROVIDER!r} — use deepgram or elevenlabs")
+
+    def _make_workspace_tools(self):
+        from agent.tools import WorkspaceTools
+        return WorkspaceTools()
 
     def _wrap_llm_get(self, llm):
         """Wrap llm.get_chat_completions to publish the exact LLM input for the dashboard."""

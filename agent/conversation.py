@@ -11,7 +11,9 @@ import re
 from agent.config import Config
 from agent.coordinator import Coordinator
 from agent.task_events import TaskState
+from agent.tools import WorkspaceTools
 from services.llm_client import OpenRouterClient, LLMError
+from services.websearch import search_web
 
 log = logging.getLogger("conversation")
 
@@ -19,7 +21,10 @@ SYSTEM_PROMPT = (
     "You are a helpful voice-first assistant running locally on a Raspberry Pi 5. "
     "You can delegate build/code tasks to a background coding agent (submit_task) while staying "
     "available to chat. Keep spoken replies short (1-3 sentences). "
-    "Available tools: submit_task, task_status, task_cancel, build_website, publish_website.\n"
+    "Available tools: submit_task, task_status, task_cancel, build_website, search_web, "
+    "get_time, create_file, edit_file, read_file, list_workspace, run_command, publish_website.\n"
+    "For small tasks (a quick script, a one-file fix) do them yourself with create_file/"
+    "run_command; for bigger multi-step builds delegate with submit_task or build_website.\n"
     "Publishing to GitHub always requires the user's explicit approval in the conversation — "
     "never call publish_website unless the user has clearly agreed to publish this exact site."
 )
@@ -33,6 +38,18 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]}}},
     {"type": "function", "function": {"name": "get_time", "description": "Get the current local date, time and weekday.",
      "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "search_web", "description": "Search the web for current information (news, weather, prices, facts). Returns titles, snippets and URLs.",
+     "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "The search query"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "create_file", "description": "Create a file in the workspace (relative path only; parents auto-created).",
+     "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}},
+    {"type": "function", "function": {"name": "edit_file", "description": "Replace one exact occurrence of old_text with new_text in a workspace file.",
+     "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}}},
+    {"type": "function", "function": {"name": "read_file", "description": "Read a text file from the workspace.",
+     "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
+    {"type": "function", "function": {"name": "list_workspace", "description": "List files in the workspace.",
+     "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "run_command", "description": "Run an allowlisted shell command (python, pip, git, node, file tools) in the workspace and get its output.",
+     "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}},
     {"type": "function", "function": {"name": "build_website", "description": "Generate a small website in the workspace (background). Returns a task id.",
      "parameters": {"type": "object", "properties": {"request": {"type": "string"}}, "required": ["request"]}}},
     {"type": "function", "function": {"name": "publish_website", "description": "Publish a website from the workspace to GitHub. Requires explicit prior user approval.",
@@ -50,6 +67,7 @@ class ConversationAgent:
     def __init__(self, coordinator: Coordinator, announcer=None):
         self.coordinator = coordinator
         self.client = OpenRouterClient()  # FAST_MODEL
+        self.workspace_tools = WorkspaceTools()
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         self.announcer = announcer or (lambda text: print(f"[agent] {text}"))
 
@@ -59,6 +77,12 @@ class ConversationAgent:
                 "task_cancel": self._task_cancel,
                 "build_website": self._build_website,
                 "get_time": self._get_time,
+                "search_web": self._search_web,
+                "create_file": self._create_file,
+                "edit_file": self._edit_file,
+                "read_file": self._read_file,
+                "list_workspace": self._list_workspace,
+                "run_command": self._run_command,
                 "publish_website": self._publish_website}
 
     # tool implementations -------------------------------------------------
@@ -87,6 +111,30 @@ class ConversationAgent:
     async def _get_time(self) -> str:
         import datetime
         return datetime.datetime.now().strftime("%A, %d %B %Y, %H:%M:%S")
+
+    async def _search_web(self, query: str) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, search_web, query)
+
+    async def _create_file(self, path: str, content: str) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.workspace_tools.create_file, path, content)
+
+    async def _edit_file(self, path: str, old_text: str, new_text: str) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.workspace_tools.edit_file, path, old_text, new_text)
+
+    async def _read_file(self, path: str) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.workspace_tools.read_file, path)
+
+    async def _list_workspace(self) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.workspace_tools.list_workspace)
+
+    async def _run_command(self, command: str) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.workspace_tools.run_command, command)
 
     async def _publish_website(self, project: str, repo_name: str = "") -> str:
         from services.github_client import publish_website
