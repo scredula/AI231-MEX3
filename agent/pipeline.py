@@ -240,11 +240,14 @@ class VoicePipelineAgent:
         self.coordinator.on_announce(announce)
 
         from agent.dashboard import DashboardServer
-        from pipecat.frames.frames import TextFrame
+        from pipecat.frames.frames import TranscriptionFrame
 
         async def say(text: str) -> None:
-            """Inject typed text from the dashboard as if the user said it."""
-            await worker.queue_frame(TextFrame(text))
+            """Inject typed text from the dashboard as a synthetic transcript.
+
+            TranscriptionFrame (not TextFrame) so the aggregator treats it as user
+            speech and TTS doesn't read it back aloud."""
+            await worker.queue_frame(TranscriptionFrame(text, "", 16000))
 
         dashboard = DashboardServer(bus, say_handler=say)
         dashboard.start()

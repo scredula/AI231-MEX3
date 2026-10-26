@@ -13,6 +13,13 @@ import threading
 import time
 from typing import Optional
 
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame, BotStoppedSpeakingFrame, ErrorFrame,
+    FunctionCallInProgressFrame, FunctionCallResultFrame, FunctionCallsStartedFrame,
+    InterruptionFrame, LLMTextFrame, TranscriptionFrame, TTSSpeakFrame,
+    UserStartedSpeakingFrame, UserStoppedSpeakingFrame,
+)
+
 log = logging.getLogger("observability")
 
 
@@ -141,15 +148,15 @@ class DashboardObserver:
         self.bus.publish(event)
 
     async def on_push_frame(self, data) -> None:
+        try:
+            await self._handle(data)
+        except Exception:
+            log.exception("dashboard observer error")
+
+    async def _handle(self, data) -> None:
         frame = data.frame
         now = time.monotonic()
         t = self.tracker
-        from pipecat.frames.frames import (
-            BotStartedSpeakingFrame, BotStoppedSpeakingFrame, ErrorFrame,
-            FunctionCallInProgressFrame, FunctionCallResultFrame, FunctionCallsStartedFrame,
-            InterruptionFrame, LLMTextFrame, StartInterruptionFrame,
-            TranscriptionFrame, TTSSpeakFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame,
-        )
         if isinstance(frame, UserStartedSpeakingFrame):
             if t.t_bot_speech and not t.tts_contexts_done:
                 pass
@@ -160,7 +167,7 @@ class DashboardObserver:
             t.t_transcript = now
             t.transcript_text = str(getattr(frame, "text", ""))
             self._emit({"type": "transcript", "turn": t.turn_id, "text": t.transcript_text})
-        elif isinstance(frame, InterruptionFrame) or isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             if t.t_bot_speech:
                 t.interrupted = True
                 self._emit({"type": "interruption", "turn": t.turn_id,
