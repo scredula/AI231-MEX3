@@ -113,11 +113,29 @@ class TurnTracker:
 
 
 class DashboardObserver:
-    """Pipecat observer: publish conversation events + latencies to the EventBus."""
+    """Pipecat observer: publish conversation events + latencies to the EventBus.
+
+    Subclasses pipecat's BaseObserver (lifecycle + first-push-only delivery).
+    """
 
     def __init__(self, bus: EventBus):
+        from pipecat.observers.base_observer import BaseObserver
+
+        class _PipecatBridge(BaseObserver):
+            def __init__(inner_self, obs):
+                super().__init__(observe_every_push=False)
+                inner_self._obs = obs
+
+            async def on_push_frame(inner_self, data) -> None:
+                await inner_self._obs.on_push_frame(data)
+
         self.bus = bus
         self.tracker = TurnTracker(self._emit)
+        self._bridge = _PipecatBridge(self)
+
+    def pipecat_observer(self):
+        """The actual BaseObserver instance to register with the pipeline worker."""
+        return self._bridge
 
     def _emit(self, event: dict) -> None:
         self.bus.publish(event)

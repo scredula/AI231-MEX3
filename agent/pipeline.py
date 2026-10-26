@@ -150,7 +150,7 @@ class VoicePipelineAgent:
             aggregators.assistant(),
             transport.output(),
         ])
-        worker = PipelineWorker(pipeline, observers=[observer])
+        worker = PipelineWorker(pipeline, observers=[observer.pipecat_observer()])
 
         def announce(text: str) -> None:
             """Speak a task announcement without blocking the pipeline."""
