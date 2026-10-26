@@ -89,7 +89,7 @@ class PiAdapter:
                 fut.set_result(rec)
         else:
             self._last_event = rec
-            if rec.get("type") == "agent_settled" and self._settled_hook:
+            if rec.get("type") in ("agent_settled", "agent_end") and self._settled_hook:
                 self._settled_hook(rec)
             self._emit(rec)
 
