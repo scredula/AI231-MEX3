@@ -31,6 +31,8 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]}}},
     {"type": "function", "function": {"name": "task_cancel", "description": "Cancel a running background task.",
      "parameters": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]}}},
+    {"type": "function", "function": {"name": "get_time", "description": "Get the current local date, time and weekday.",
+     "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "build_website", "description": "Generate a small website in the workspace (background). Returns a task id.",
      "parameters": {"type": "object", "properties": {"request": {"type": "string"}}, "required": ["request"]}}},
     {"type": "function", "function": {"name": "publish_website", "description": "Publish a website from the workspace to GitHub. Requires explicit prior user approval.",
@@ -56,6 +58,7 @@ class ConversationAgent:
                 "task_status": self._task_status,
                 "task_cancel": self._task_cancel,
                 "build_website": self._build_website,
+                "get_time": self._get_time,
                 "publish_website": self._publish_website}
 
     # tool implementations -------------------------------------------------
@@ -80,6 +83,10 @@ class ConversationAgent:
         task_id = await self.coordinator.submit(build_website_task(request))
         self.announcer("Building the website now — I'll tell you when it's ready to preview.")
         return json.dumps({"task_id": task_id})
+
+    async def _get_time(self) -> str:
+        import datetime
+        return datetime.datetime.now().strftime("%A, %d %B %Y, %H:%M:%S")
 
     async def _publish_website(self, project: str, repo_name: str = "") -> str:
         from services.github_client import publish_website

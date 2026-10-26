@@ -44,6 +44,9 @@ class Config:
     AUDIO_INPUT_DEVICE = _env("AUDIO_INPUT_DEVICE") or None
     AUDIO_OUTPUT_DEVICE = _env("AUDIO_OUTPUT_DEVICE") or None
 
+    # Dashboard
+    DASHBOARD_PORT = int(_env("DASHBOARD_PORT", "8900"))
+
     LOG_LEVEL = _env("LOG_LEVEL", "INFO")
 
     @classmethod

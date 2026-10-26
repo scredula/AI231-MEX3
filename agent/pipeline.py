@@ -13,8 +13,30 @@ import asyncio
 import logging
 
 from agent.config import Config
+from agent.observability import DashboardObserver, EventBus
 
 log = logging.getLogger("pipeline")
+
+
+def _llm_messages(context) -> list:
+    """Serialize an LLMContext's messages for the dashboard (defensive, truncated)."""
+    from agent.observability import _serialize_content
+
+    out = []
+    try:
+        for m in context.get_messages():
+            role = getattr(m, "role", None)
+            if role is None and isinstance(m, dict):
+                role = m.get("role", "?")
+            content = getattr(m, "content", None)
+            if content is None and isinstance(m, dict):
+                content = m.get("content")
+            out.append({"role": str(role or "?"),
+                        "content": _serialize_content(content)[:1200]})
+    except Exception:
+        logging.getLogger("observability").exception("llm message serialization failed")
+        out.append({"role": "error", "content": "(failed to serialize messages)"})
+    return out
 
 
 class VoicePipelineAgent:
@@ -53,13 +75,23 @@ class VoicePipelineAgent:
                                settings=OpenAILLMService.Settings(model=Config.FAST_MODEL))
         tts = self._make_tts_service(transport_sample_rate=24000)
 
+        # observability: dashboard + frame observer + LLM request capture
+        from agent.observability import DashboardObserver, ObservableLLMService
+        bus = EventBus()
+        self.bus = bus
+        observer = DashboardObserver(bus)
+        llm._observer = observer
+        llm.get_chat_completions = self._wrap_llm_get(llm)
+        del ObservableLLMService  # documented mixin; hook wired manually above
+
         system = {
             "role": "system",
             "content": (
                 "You are a friendly assistant running on a Raspberry Pi 5. Keep spoken answers "
                 "short (1-3 sentences). You can delegate coding/build jobs to a background agent "
-                "with submit_task and check on them with task_status. Never publish anything to "
-                "GitHub unless the user explicitly approves in this conversation."
+                "with submit_task and check on them with task_status. For the current time, use "
+                "get_time. Never publish anything to GitHub unless the user explicitly approves "
+                "in this conversation."
             ),
         }
 
@@ -99,7 +131,13 @@ class VoicePipelineAgent:
             """
             return await agent.build_website(request)
 
-        context = LLMContext([system], tools=[submit_task, task_status, task_cancel, build_website])
+        async def get_time(params: FunctionCallParams) -> str:
+            """Get the current local date and time, and the day of the week."""
+            import datetime
+            now = datetime.datetime.now()
+            return now.strftime("%A, %d %B %Y, %H:%M:%S")
+
+        context = LLMContext([system], tools=[submit_task, task_status, task_cancel, build_website, get_time])
         aggregators = LLMContextAggregatorPair(context)
 
         pipeline = Pipeline([
@@ -112,7 +150,7 @@ class VoicePipelineAgent:
             aggregators.assistant(),
             transport.output(),
         ])
-        worker = PipelineWorker(pipeline)
+        worker = PipelineWorker(pipeline, observers=[observer])
 
         def announce(text: str) -> None:
             """Speak a task announcement without blocking the pipeline."""
@@ -121,6 +159,11 @@ class VoicePipelineAgent:
                 lambda: asyncio.create_task(worker.queue_frame(TTSSpeakFrame(text))))
 
         self.coordinator.on_announce(announce)
+
+        from agent.dashboard import DashboardServer
+        dashboard = DashboardServer(bus)
+        dashboard.start()
+        log.info("conversation dashboard: %s", dashboard.url())
 
         runner = WorkerRunner()
         await runner.add_workers(worker)
@@ -168,3 +211,17 @@ class VoicePipelineAgent:
                 settings=ElevenLabsTTSService.Settings(
                     voice=Config.TTS_VOICE_ID, model=Config.TTS_MODEL))
         raise SystemExit(f"unsupported TTS_PROVIDER {Config.TTS_PROVIDER!r} — use deepgram or elevenlabs")
+
+    def _wrap_llm_get(self, llm):
+        """Wrap llm.get_chat_completions to publish the exact LLM input for the dashboard."""
+        import time as _time
+
+        async def wrapped(context):
+            obs = getattr(llm, "_observer", None)
+            if obs is not None:
+                obs.bus.publish({"type": "llm_request", "turn": obs.tracker.turn_id,
+                                 "messages": _llm_messages(context)})
+                obs.tracker.t_llm_request = _time.monotonic()
+            return await llm.__class__.get_chat_completions(llm, context)
+
+        return wrapped
