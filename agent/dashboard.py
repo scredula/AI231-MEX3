@@ -111,13 +111,14 @@ function evtCard(ev,summary,ok){
  let card=evts.get(id);
  if(!card){card=document.createElement('div');card.className='evt';evts.set(id,card);
   const [ic,label]=meta(ev.name||'');
-  card.innerHTML='<div class=\"t\"><span class=\"ic\">'+ic+'</span><span class=\"nm\">'+label+'</span>'+
-   '<span class=\"sum\"></span><span class=\"tm\">'+now()+'</span><span class=\"chip run\">RUNNING</span></div>'+
+  const tm=ev.ts?new Date(ev.ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):now();
+  card.innerHTML='<div class="t"><span class="ic">'+ic+'</span><span class="nm">'+label+'</span>'+
+   '<span class="sum"></span><span class="tm">'+tm+'</span><span class="chip run">RUNNING</span></div>'+
    '<details><summary>details</summary><pre></pre></details>';
   card.dataset.sum=summary||'';feed2.appendChild(card);
   card.querySelector('.sum').textContent=(summary||'').slice(0,80);}
  const chip=card.querySelector('.chip');
- if(ok===true){chip.className='chip ok';chip.textContent='COMPLETED';}
+ if(ok===true){const d=ev.duration?(' · '+ev.duration+'s'):'';chip.className='chip ok';chip.textContent='COMPLETED'+d;}
  else if(ok===false){chip.className='chip fail';chip.textContent='FAILED';}
  return card.querySelector('pre');}
 function evtInfo(ev,ok){const pre=evtCard(ev,ev.arguments||ev.query||ev.location||'',ok);
@@ -145,7 +146,8 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
     let d=document.createElement('div');d.className='sys-note';
     d.textContent='latency — speech→transcript '+(l.speech_to_transcript==null?'—':(l.speech_to_transcript*1000|0)+'ms')
      +', LLM→first token '+(l.llm_request_to_first_token==null?'—':(l.llm_request_to_first_token*1000|0)+'ms')
-     +', LLM→spoken '+(l.llm_request_to_bot_speech==null?'—':(l.llm_request_to_bot_speech*1000|0)+'ms');
+     +', LLM→spoken '+(l.llm_request_to_bot_speech==null?'—':(l.llm_request_to_bot_speech*1000|0)+'ms')
+     +(l.speech_end_to_bot_speech==null?'':(', TOTAL speech-end→spoken '+(l.speech_end_to_bot_speech*1000|0)+'ms'));
     feed.appendChild(d);}
    break;
   case 'tool_running':setTyping(true);state('running '+ev.name);evtInfo(ev,null);break;

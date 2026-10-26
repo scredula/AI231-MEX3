@@ -44,6 +44,7 @@ class VoicePipelineAgent:
         self.coordinator = coordinator
 
     async def run(self) -> None:
+        from pipecat.audio.vad.vad_analyzer import VADParams
         from pipecat.audio.vad.silero import SileroVADAnalyzer
         from pipecat.frames.frames import TTSSpeakFrame
         from pipecat.pipeline.pipeline import Pipeline
@@ -68,7 +69,7 @@ class VoicePipelineAgent:
             input_device_index=int(Config.AUDIO_INPUT_DEVICE) if Config.AUDIO_INPUT_DEVICE else None,
             output_device_index=int(Config.AUDIO_OUTPUT_DEVICE) if Config.AUDIO_OUTPUT_DEVICE else None,
         ))
-        vad = VADProcessor(vad_analyzer=SileroVADAnalyzer())
+        vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=Config.TURN_STOP_SECS)))
         stt = DeepgramSTTService(api_key=Config.ASR_API_KEY, model=Config.ASR_MODEL)
         llm = OpenAILLMService(api_key=Config.OPENROUTER_API_KEY,
                                base_url=Config.OPENROUTER_BASE_URL,

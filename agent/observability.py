@@ -98,7 +98,8 @@ class TurnTracker:
             "transcript_to_llm_request": self._lat(self.t_transcript, self.t_llm_request),
             "llm_request_to_first_token": self._lat(self.t_llm_request, self.t_llm_first_token),
             "llm_request_to_bot_speech": self._lat(self.t_llm_request, self.t_bot_speech),
-            "speech_to_bot_speech": self._lat(self.t_user_speech, self.t_bot_speech),
+            "speech_end_to_bot_speech": self._lat(self.t_speech_end, self.t_bot_speech),
+            "speech_onset_to_bot_speech": self._lat(self.t_user_speech, self.t_bot_speech),
             "interrupted": self.interrupted,
         }
 
@@ -138,6 +139,7 @@ class DashboardObserver:
 
         self.bus = bus
         self.tracker = TurnTracker(self._emit)
+        self._tool_starts = {}  # tool_call_id -> monotonic start
         self._bridge = _PipecatBridge(self)
 
     def pipecat_observer(self):
@@ -177,16 +179,21 @@ class DashboardObserver:
                       "arguments": str(getattr(c, "arguments", ""))} for c in getattr(frame, "function_calls", [])]
             self._emit({"type": "tool_calls_started", "turn": t.turn_id, "calls": calls})
         elif isinstance(frame, FunctionCallInProgressFrame):
+            call_id = str(getattr(frame, "tool_call_id", ""))
+            self._tool_starts[call_id] = now
             self._emit({"type": "tool_running", "turn": t.turn_id,
-                        "id": str(getattr(frame, "tool_call_id", "")),
+                        "id": call_id,
                         "name": getattr(frame, "function_name", "?"),
                         "arguments": _safe_json(getattr(frame, "arguments", None))})
         elif isinstance(frame, FunctionCallResultFrame):
             result = getattr(frame, "result", "")
+            call_id = str(getattr(frame, "tool_call_id", ""))
+            start = self._tool_starts.pop(call_id, None)
             self._emit({"type": "tool_result", "turn": t.turn_id,
-                        "id": str(getattr(frame, "tool_call_id", "")),
+                        "id": call_id,
                         "name": getattr(frame, "function_name", "?"),
                         "ok": "error" not in str(result)[:80].lower(),
+                        "duration": round(now - start, 3) if start is not None else None,
                         "result": str(result)[:500]})
         elif isinstance(frame, LLMTextFrame):
             text = str(getattr(frame, "text", ""))

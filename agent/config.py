@@ -44,6 +44,11 @@ class Config:
     AUDIO_INPUT_DEVICE = _env("AUDIO_INPUT_DEVICE") or None
     AUDIO_OUTPUT_DEVICE = _env("AUDIO_OUTPUT_DEVICE") or None
 
+    # Voice turn detection: seconds of silence before the agent decides you
+    # finished speaking. Raise it if you pause mid-sentence and it keeps
+    # cutting you off (lower = snappier, higher = more patient).
+    TURN_STOP_SECS = float(_env("TURN_STOP_SECS", "0.8"))
+
     # Dashboard
     DASHBOARD_PORT = int(_env("DASHBOARD_PORT", "8900"))
 
