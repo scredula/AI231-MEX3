@@ -52,7 +52,7 @@ const es=new EventSource('/events');
 es.onopen=()=>status('live');
 es.onerror=()=>status('reconnecting…');
 function status(s){document.getElementById('status').textContent=s;}
-let cur=null;
+let cur=null; let prevMsgs=[];
 function turn(id){if(!cur||cur.dataset.id!==String(id)){cur=document.createElement('div');cur.className='turn';cur.dataset.id=String(id);
  cur.innerHTML='<div class="head"><b>turn '+id+'</b><span class="t">'+new Date().toLocaleTimeString()+'</span></div><div class="body"></div>';
  feed.appendChild(cur);}return cur.querySelector('.body');}
@@ -65,12 +65,24 @@ function lats(body,l){if(!l)return;const b=document.createElement('div');b.class
  body.appendChild(b);}
 function toolcard(body,name,details,cls){let t=document.createElement('div');t.className='tool';
  t.innerHTML='<span class="name">'+name+'</span><pre></pre>';t.querySelector('pre').textContent=details||'';body.appendChild(t);}
+function fmtMsg(m){return '['+m.role+'] '+m.content;}
+function renderMsgs(container,msgs){msgs.forEach(m=>{let d=document.createElement('div');d.className='sys';
+ d.textContent=fmtMsg(m);container.appendChild(d);});}
 es.onmessage=(e)=>{const ev=JSON.parse(e.data);const body=turn(ev.turn??0);
  switch(ev.type){
   case 'turn_start':break;
   case 'transcript':sec(body,'you said','user',ev.text);break;
-  case 'llm_request':{let d=document.createElement('details');d.innerHTML='<summary>LLM input ('+ev.messages.length+' msgs'+(ev.model?' · '+ev.model:'')+')</summary><pre></pre>';
-   d.querySelector('pre').textContent=ev.messages.map(m=>'['+m.role+'] '+m.content).join('\\n');body.appendChild(d);break;}
+  case 'llm_request':{let all=ev.messages;
+   // chat-style: show only messages new since the previous request
+   let common=0;while(common<prevMsgs.length&&common<all.length&&prevMsgs[common].role===all[common].role&&prevMsgs[common].content===all[common].content)common++;
+   let delta=all.slice(common);
+   if(delta.length){let d=document.createElement('details');d.className='sec';
+    d.innerHTML='<summary>new context ('+delta.length+' new msg'+(delta.length===1?'':'s')+')</summary><pre></pre>';
+    renderMsgs(d.querySelector('pre'),delta);body.appendChild(d);}
+   if(all.length){let d=document.createElement('details');d.className='sec';
+    d.innerHTML='<summary>full history ('+all.length+' msgs'+(ev.model?' · '+ev.model:'')+')</summary><pre></pre>';
+    renderMsgs(d.querySelector('pre'),all);body.appendChild(d);}
+   prevMsgs=all;break;}
   case 'llm_delta':{let d=body.querySelector('.bot.live');if(!d){d=sec(body,'assistant','bot live','');}d.querySelector('span:last-child').textContent+=ev.delta;break;}
   case 'tool_calls_started':ev.calls.forEach(c=>toolcard(body,c.name,c.arguments));break;
   case 'tool_running':toolcard(body,ev.name,ev.arguments);break;
