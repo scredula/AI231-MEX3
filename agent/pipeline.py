@@ -25,8 +25,8 @@ class VoicePipelineAgent:
         from pipecat.audio.vad.silero import SileroVADAnalyzer
         from pipecat.frames.frames import TTSSpeakFrame
         from pipecat.pipeline.pipeline import Pipeline
-        from pipecat.pipeline.runner import PipelineRunner
-        from pipecat.pipeline.task import PipelineTask
+        from pipecat.pipeline.worker import PipelineWorker
+        from pipecat.workers.runner import WorkerRunner
         from pipecat.processors.aggregators.llm_context import LLMContext
         from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
         from pipecat.processors.audio.vad_processor import VADProcessor
@@ -51,10 +51,10 @@ class VoicePipelineAgent:
         stt = DeepgramSTTService(api_key=Config.ASR_API_KEY, model=Config.ASR_MODEL)
         llm = OpenAILLMService(api_key=Config.OPENROUTER_API_KEY,
                                base_url=Config.OPENROUTER_BASE_URL,
-                               model=Config.FAST_MODEL)
+                               settings=OpenAILLMService.Settings(model=Config.FAST_MODEL))
         tts = ElevenLabsTTSService(api_key=Config.TTS_API_KEY,
-                                   voice_id=Config.TTS_VOICE_ID,
-                                   model=Config.TTS_MODEL)
+                                   settings=ElevenLabsTTSService.Settings(
+                                       voice=Config.TTS_VOICE_ID, model=Config.TTS_MODEL))
 
         system = {
             "role": "system",
@@ -68,20 +68,38 @@ class VoicePipelineAgent:
 
         agent = self._make_tool_host()
 
-        async def submit_task(description: str) -> str:
-            """Delegate a task to the background coding agent. Returns the task id immediately."""
+        from pipecat.services.llm_service import FunctionCallParams
+
+        async def submit_task(params: FunctionCallParams, description: str) -> str:
+            """Delegate a task to the background coding agent. Returns the task id immediately.
+
+            Args:
+                description: What the background agent should build or do.
+            """
             return await agent.submit_task(description)
 
-        async def task_status(task_id: str) -> str:
-            """Get the current state and latest progress of a background task."""
+        async def task_status(params: FunctionCallParams, task_id: str) -> str:
+            """Get the current state and latest progress of a background task.
+
+            Args:
+                task_id: The task id returned by submit_task.
+            """
             return await agent.task_status(task_id)
 
-        async def task_cancel(task_id: str) -> str:
-            """Cancel a running background task."""
+        async def task_cancel(params: FunctionCallParams, task_id: str) -> str:
+            """Cancel a running background task.
+
+            Args:
+                task_id: The task id to cancel.
+            """
             return await agent.task_cancel(task_id)
 
-        async def build_website(request: str) -> str:
-            """Build a small website in the workspace from a natural-language request."""
+        async def build_website(params: FunctionCallParams, request: str) -> str:
+            """Build a small website in the workspace from a natural-language request.
+
+            Args:
+                request: What the website should contain.
+            """
             return await agent.build_website(request)
 
         context = LLMContext([system], tools=[submit_task, task_status, task_cancel, build_website])
@@ -97,17 +115,19 @@ class VoicePipelineAgent:
             aggregators.assistant(),
             transport.output(),
         ])
-        task = PipelineTask(pipeline)
+        worker = PipelineWorker(pipeline)
 
         def announce(text: str) -> None:
             """Speak a task announcement without blocking the pipeline."""
-            asyncio.get_event_loop().call_soon_threadsafe(
-                lambda: asyncio.create_task(task.queue_frame(TTSSpeakFrame(text))))
+            loop = asyncio.get_event_loop()
+            loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(worker.queue_frame(TTSSpeakFrame(text))))
 
         self.coordinator.on_announce(announce)
 
-        runner = PipelineRunner()
-        await runner.run(task)
+        runner = WorkerRunner()
+        runner.add_workers([worker])
+        await runner.run()
 
     def _make_tool_host(self):
         """Tool implementations shared with the text-mode agent, minus its announcer."""
