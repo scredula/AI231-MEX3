@@ -40,6 +40,8 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "search_web", "description": "Search the web for current information (news, weather, prices, facts). Returns titles, snippets and URLs.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "The search query"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "get_weather", "description": "Current weather and today's forecast for a location (Open-Meteo, live data).",
+     "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "City or place name"}, "units": {"type": "string", "enum": ["metric", "imperial"]}}, "required": ["location"]}}},
     {"type": "function", "function": {"name": "create_file", "description": "Create a file in the workspace (relative path only; parents auto-created).",
      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}}},
     {"type": "function", "function": {"name": "edit_file", "description": "Replace one exact occurrence of old_text with new_text in a workspace file.",
@@ -78,6 +80,7 @@ class ConversationAgent:
                 "build_website": self._build_website,
                 "get_time": self._get_time,
                 "search_web": self._search_web,
+                "get_weather": self._get_weather,
                 "create_file": self._create_file,
                 "edit_file": self._edit_file,
                 "read_file": self._read_file,
@@ -115,6 +118,13 @@ class ConversationAgent:
     async def _search_web(self, query: str) -> str:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, search_web, query)
+
+    async def _get_weather(self, location: str, units: str = "metric") -> str:
+        from services.weather import get_weather as _gw, WeatherError
+        try:
+            return await _gw(location, units)
+        except WeatherError as e:
+            return f"error: {e}"
 
     async def _create_file(self, path: str, content: str) -> str:
         loop = asyncio.get_event_loop()

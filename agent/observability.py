@@ -171,12 +171,16 @@ class DashboardObserver:
             self._emit({"type": "tool_calls_started", "turn": t.turn_id, "calls": calls})
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._emit({"type": "tool_running", "turn": t.turn_id,
+                        "id": str(getattr(frame, "tool_call_id", "")),
                         "name": getattr(frame, "function_name", "?"),
                         "arguments": _safe_json(getattr(frame, "arguments", None))})
         elif isinstance(frame, FunctionCallResultFrame):
+            result = getattr(frame, "result", "")
             self._emit({"type": "tool_result", "turn": t.turn_id,
+                        "id": str(getattr(frame, "tool_call_id", "")),
                         "name": getattr(frame, "function_name", "?"),
-                        "result": str(getattr(frame, "result", ""))[:500]})
+                        "ok": "error" not in str(result)[:80].lower(),
+                        "result": str(result)[:500]})
         elif isinstance(frame, LLMTextFrame):
             text = str(getattr(frame, "text", ""))
             if not t.t_llm_first_token:

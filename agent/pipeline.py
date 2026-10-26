@@ -90,7 +90,8 @@ class VoicePipelineAgent:
                 "You are a friendly assistant running on a Raspberry Pi 5. Keep spoken answers "
                 "short (1-3 sentences). You can delegate coding/build jobs to a background agent "
                 "with submit_task and check on them with task_status. For the current time, use "
-                "get_time; for current events or weather, use search_web and summarize the "
+                "get_time; for weather use get_weather (live data); for other current events or facts, "
+                "use search_web and summarize the "
                 "results in one or two spoken sentences. For quick scripts or one-file fixes, "
                 "use create_file, edit_file, read_file and run_command yourself; leave bigger "
                 "multi-step builds to the background agent with submit_task. Never publish "
@@ -140,7 +141,7 @@ class VoicePipelineAgent:
             await params.result_callback(datetime.datetime.now().strftime("%A, %d %B %Y, %H:%M:%S"))
 
         async def search_web(params: FunctionCallParams, query: str) -> None:
-            """Search the web for current information (news, weather, prices, facts).
+            """Search the web for current information (news, prices, facts).
 
             Args:
                 query: The search query.
@@ -148,6 +149,20 @@ class VoicePipelineAgent:
             import asyncio as _aio
             from services.websearch import search_web as _search
             result = await _aio.get_event_loop().run_in_executor(None, _search, query)
+            await params.result_callback(result)
+
+        async def get_weather(params: FunctionCallParams, location: str, units: str = "metric") -> None:
+            """Get current weather and today's forecast for a location (live data).
+
+            Args:
+                location: City or place name.
+                units: metric (Celsius) or imperial (Fahrenheit).
+            """
+            from services.weather import get_weather as _gw, WeatherError
+            try:
+                result = await _gw(location, units)
+            except WeatherError as e:
+                result = f"error: {e}"
             await params.result_callback(result)
 
         workspace_tools = self._make_workspace_tools()
@@ -200,8 +215,8 @@ class VoicePipelineAgent:
             await params.result_callback(result)
 
         context = LLMContext([system], tools=[submit_task, task_status, task_cancel, build_website,
-                                              get_time, search_web, create_file, edit_file,
-                                              read_file, run_command])
+                                              get_time, search_web, get_weather, create_file,
+                                              edit_file, read_file, run_command])
         aggregators = LLMContextAggregatorPair(context)
 
         pipeline = Pipeline([
@@ -225,7 +240,13 @@ class VoicePipelineAgent:
         self.coordinator.on_announce(announce)
 
         from agent.dashboard import DashboardServer
-        dashboard = DashboardServer(bus)
+        from pipecat.frames.frames import TextFrame
+
+        async def say(text: str) -> None:
+            """Inject typed text from the dashboard as if the user said it."""
+            await worker.queue_frame(TextFrame(text))
+
+        dashboard = DashboardServer(bus, say_handler=say)
         dashboard.start()
         log.info("conversation dashboard: %s", dashboard.url())
 
