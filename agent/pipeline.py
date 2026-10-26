@@ -99,43 +99,42 @@ class VoicePipelineAgent:
 
         from pipecat.services.llm_service import FunctionCallParams
 
-        async def submit_task(params: FunctionCallParams, description: str) -> str:
+        async def submit_task(params: FunctionCallParams, description: str) -> None:
             """Delegate a task to the background coding agent. Returns the task id immediately.
 
             Args:
                 description: What the background agent should build or do.
             """
-            return await agent.submit_task(description)
+            await params.result_callback(await agent.submit_task(description))
 
-        async def task_status(params: FunctionCallParams, task_id: str) -> str:
+        async def task_status(params: FunctionCallParams, task_id: str) -> None:
             """Get the current state and latest progress of a background task.
 
             Args:
                 task_id: The task id returned by submit_task.
             """
-            return await agent.task_status(task_id)
+            await params.result_callback(await agent.task_status(task_id))
 
-        async def task_cancel(params: FunctionCallParams, task_id: str) -> str:
+        async def task_cancel(params: FunctionCallParams, task_id: str) -> None:
             """Cancel a running background task.
 
             Args:
                 task_id: The task id to cancel.
             """
-            return await agent.task_cancel(task_id)
+            await params.result_callback(await agent.task_cancel(task_id))
 
-        async def build_website(params: FunctionCallParams, request: str) -> str:
+        async def build_website(params: FunctionCallParams, request: str) -> None:
             """Build a small website in the workspace from a natural-language request.
 
             Args:
                 request: What the website should contain.
             """
-            return await agent.build_website(request)
+            await params.result_callback(await agent.build_website(request))
 
-        async def get_time(params: FunctionCallParams) -> str:
+        async def get_time(params: FunctionCallParams) -> None:
             """Get the current local date and time, and the day of the week."""
             import datetime
-            now = datetime.datetime.now()
-            return now.strftime("%A, %d %B %Y, %H:%M:%S")
+            await params.result_callback(datetime.datetime.now().strftime("%A, %d %B %Y, %H:%M:%S"))
 
         context = LLMContext([system], tools=[submit_task, task_status, task_cancel, build_website, get_time])
         aggregators = LLMContextAggregatorPair(context)
