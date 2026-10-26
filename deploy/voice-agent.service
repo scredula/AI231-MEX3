@@ -1,0 +1,22 @@
+# systemd unit: run the voice agent at boot on the Raspberry Pi 5.
+# Install:  sudo cp deploy/voice-agent.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now voice-agent
+[Unit]
+Description=Full-duplex voice AI agent (AI231-MEX3)
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/AI231-MEX3
+ExecStart=/home/%i/AI231-MEX3/.venv/bin/python -m agent.main --voice
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+# Resource limits suited to a Pi 5 (4-8 GB): keep memory bounded
+MemoryMax=1500M
+CPUWeight=80
+
+[Install]
+WantedBy=multi-user.target

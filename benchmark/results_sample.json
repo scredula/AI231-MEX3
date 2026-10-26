@@ -1,0 +1,53 @@
+{
+ "meta": {
+  "started_at": 6606.656,
+  "model": {
+   "fast_model": "z-ai/glm-5.3-flash",
+   "coding_model": "z-ai/glm-5.3-flash",
+   "asr_provider": "deepgram",
+   "tts_provider": "elevenlabs"
+  }
+ },
+ "turns": [
+  {
+   "turn_id": 1,
+   "t_speech_onset": null,
+   "t_speech_end": null,
+   "t_asr_result": null,
+   "t_llm_first_token": 1.3280000000004293,
+   "t_tts_first_chunk": null,
+   "t_first_audible": null,
+   "t_interrupt_onset": null,
+   "t_interrupt_playback_stopped": null,
+   "t_task_submit": null,
+   "t_task_complete": null,
+   "vad_to_asr": null,
+   "asr_to_llm": null,
+   "llm_to_tts": null,
+   "tts_to_audible": null,
+   "speech_onset_to_audible": null,
+   "interruption_latency": null,
+   "meta_mode": "text"
+  },
+  {
+   "turn_id": 2,
+   "t_speech_onset": null,
+   "t_speech_end": null,
+   "t_asr_result": null,
+   "t_llm_first_token": 1.4839999999994689,
+   "t_tts_first_chunk": null,
+   "t_first_audible": null,
+   "t_interrupt_onset": null,
+   "t_interrupt_playback_stopped": null,
+   "t_task_submit": null,
+   "t_task_complete": null,
+   "vad_to_asr": null,
+   "asr_to_llm": null,
+   "llm_to_tts": null,
+   "tts_to_audible": null,
+   "speech_onset_to_audible": null,
+   "interruption_latency": null,
+   "meta_mode": "text"
+  }
+ ]
+}

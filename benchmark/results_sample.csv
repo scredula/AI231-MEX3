@@ -1,0 +1,3 @@
+asr_to_llm,interruption_latency,llm_to_tts,meta_mode,speech_onset_to_audible,t_asr_result,t_first_audible,t_interrupt_onset,t_interrupt_playback_stopped,t_llm_first_token,t_speech_end,t_speech_onset,t_task_complete,t_task_submit,t_tts_first_chunk,tts_to_audible,turn_id,vad_to_asr
+,,,text,,,,,,1.3280000000004293,,,,,,,1,
+,,,text,,,,,,1.4839999999994689,,,,,,,2,
