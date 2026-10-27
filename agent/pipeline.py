@@ -73,7 +73,9 @@ class VoicePipelineAgent:
         stt = DeepgramSTTService(api_key=Config.ASR_API_KEY, model=Config.ASR_MODEL)
         llm = OpenAILLMService(api_key=Config.OPENROUTER_API_KEY,
                                base_url=Config.OPENROUTER_BASE_URL,
-                               settings=OpenAILLMService.Settings(model=Config.FAST_MODEL))
+                               settings=OpenAILLMService.Settings(
+                                   model=Config.FAST_MODEL,
+                                   extra={"reasoning": {"exclude": True}} if Config.REASONING_EXCLUDE else {}))
         tts = self._make_tts_service(transport_sample_rate=24000)
 
         # observability: dashboard + frame observer + LLM request capture

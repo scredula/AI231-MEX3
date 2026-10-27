@@ -23,13 +23,14 @@ async def collect(s, seconds=0.4, arm=None):
 
 def make(always, **kw):
     kw.setdefault("tool_secs", 0.05)
+    kw.setdefault("delay_secs", 0.05)  # tests use a short filler delay (prod: 3s)
     return FillerSpeaker(speak=lambda t: asyncio.sleep(0), always=always, **kw)
 
 
 # ---------------- always mode (default) ----------------
 
 @pytest.mark.asyncio
-async def test_always_filler_fires_immediately_after_transcript():
+async def test_always_filler_fires_after_delay_if_no_llm_response():
     s = make(True)
     spoken = await collect(s, arm=lambda: s.on_transcript(1, "What is Florida's record?"))
     assert len(spoken) == 1 and spoken[0] in CANNED_THINKING
@@ -43,11 +44,19 @@ async def test_always_filler_is_canned_no_model():
 
 
 @pytest.mark.asyncio
-async def test_always_filler_not_cancelled_by_first_token():
-    s = make(True)
+async def test_always_filler_cancelled_by_first_token():
+    s = make(True, delay_secs=5.0)  # would fire at 5s
     spoken = await collect(s, 0.3, arm=lambda: (s.on_transcript(1, "hello"),
                                                 s.on_first_token(1)))
-    assert len(spoken) == 1  # real response starts — immediate filler still speaks
+    assert spoken == []  # LLM responded quickly — no filler
+
+
+@pytest.mark.asyncio
+async def test_always_filler_cancelled_by_bot_speech():
+    s = make(True, delay_secs=5.0)
+    spoken = await collect(s, 0.3, arm=lambda: (s.on_transcript(1, "hello"),
+                                                s.on_bot_speech(1)))
+    assert spoken == []  # bot already speaking — no filler
 
 
 @pytest.mark.asyncio
@@ -63,7 +72,7 @@ async def test_always_no_tool_filler_after_immediate():
 
     async def arm():
         s.on_transcript(1, "search for news")
-        await asyncio.sleep(0.1)   # immediate filler speaks
+        await asyncio.sleep(0.1)   # filler fires after delay_secs=0.05
         s.on_tool_running(1, "search_web")   # always-mode: must be skipped
     spoken = await collect(s, 0.3, arm)
     assert len(spoken) == 1  # only the immediate filler; no mid-turn chatter
@@ -75,7 +84,7 @@ async def test_always_still_working_after_utterance():
 
     async def arm():
         s.on_transcript(1, "do a long task")
-        await asyncio.sleep(0.3)   # immediate filler (0.2s lead-in) speaks
+        await asyncio.sleep(0.1)   # filler fires after delay_secs=0.05
         s.on_bot_speech_end(1, work_pending=True)
     spoken = await collect(s, 0.3, arm)
     assert len(spoken) == 2 and spoken[1] == TOOL_CANNED["_still_working"]
@@ -87,7 +96,7 @@ async def test_cap_limits_fillers_per_turn():
 
     async def arm():
         s.on_transcript(1, "q")
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.1)   # filler fires after delay_secs=0.05
         s.on_bot_speech_end(1, work_pending=True)
         await asyncio.sleep(0.1)
         s.on_bot_speech_end(1, work_pending=True)

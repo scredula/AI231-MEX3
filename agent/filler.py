@@ -46,6 +46,7 @@ class FillerSpeaker:
 
     def __init__(self, speak: Callable[[str], "asyncio.Future"],
                  thinking_secs: float = None, tool_secs: float = None,
+                 delay_secs: float = None,
                  enabled: bool = True, always: Optional[bool] = None,
                  max_per_turn: int = None):
         self.speak = speak  # async fn(text) — pushes TTSSpeakFrame into the pipeline
@@ -53,6 +54,9 @@ class FillerSpeaker:
         self.always = Config.FILLER_ALWAYS if always is None else always
         self.thinking_secs = thinking_secs if thinking_secs is not None else Config.THINKING_FILLER_SECS
         self.tool_secs = tool_secs if tool_secs is not None else Config.FILLER_AFTER_SECS
+        # always-mode: wait this long after the transcript; if the LLM hasn't
+        # started responding by then, speak the canned filler
+        self.delay_secs = delay_secs if delay_secs is not None else Config.FILLER_DELAY_SECS
         self.max_per_turn = max_per_turn if max_per_turn is not None else Config.FILLER_MAX_PER_TURN
         self._pending: dict = {}          # turn_id -> (asyncio.Task, kind)
         self._counts: dict = {}           # turn_id -> fillers spoken
@@ -75,20 +79,23 @@ class FillerSpeaker:
             self._start(turn_id, self._immediate(turn_id), "immediate")
 
     def on_first_token(self, turn_id: int) -> None:
-        """Real answer audio is coming — cancel pending thinking/tool fillers so
-        they don't play after the response. The immediate filler always speaks."""
-        self.cancel(turn_id, only="thinking")
-        self.cancel(turn_id, only="tool")
+        """The LLM is responding — no filler needed, cancel everything pending
+        (thinking, tool, and the delayed immediate filler)."""
+        self.cancel(turn_id)
 
     def on_tool_running(self, turn_id: int, tool_name: str) -> None:
         if not self.enabled or tool_name not in FILLER_TOOLS:
             return
         if turn_id in self._pending:
             return  # something is already armed for this turn
+        if self.always and self._counts.get(turn_id, 0) > 0:
+            return  # always-mode: a filler already spoke this turn — no mid-turn
+            # tool fillers (they delay short tools and add chatter)
         self._start(turn_id, self._canned_only(turn_id, TOOL_CANNED.get(tool_name, "One moment.")), "tool")
 
     def on_bot_speech(self, turn_id: int) -> None:
-        self.cancel(turn_id, only="tool")
+        """The bot started speaking real audio — cancel any armed fillers."""
+        self.cancel(turn_id)
 
     def on_tool_done(self, turn_id: int) -> None:
         """Tool finished — cancel its pending filler (instant tools never speak one)."""
@@ -140,8 +147,9 @@ class FillerSpeaker:
     # ---- tasks ----
     async def _immediate(self, turn_id: int) -> None:
         try:
-            # tiny delay so the immediate filler never pre-empts audio setup
-            await asyncio.sleep(0.2)
+            # wait for the LLM to respond; if it does (first token / bot speech),
+            # this task is cancelled before it ever speaks
+            await asyncio.sleep(self.delay_secs)
             await self._speak_canned(turn_id, random.choice(CANNED_THINKING))
         except asyncio.CancelledError:
             pass
