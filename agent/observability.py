@@ -161,14 +161,14 @@ class DashboardObserver:
         now = time.monotonic()
         t = self.tracker
         if isinstance(frame, UserStartedSpeakingFrame):
-            if self.filler:
-                self.filler.on_new_turn(t.turn_id)
             t.new_turn()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             t.t_speech_end = now
         elif isinstance(frame, TranscriptionFrame):
             t.t_transcript = now
             t.transcript_text = str(getattr(frame, "text", ""))
+            if self.filler:
+                self.filler.on_transcript(t.turn_id)  # real speech cancels stale fillers
             self._emit({"type": "transcript", "turn": t.turn_id, "text": t.transcript_text})
         elif isinstance(frame, InterruptionFrame):
             if t.t_bot_speech:

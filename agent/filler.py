@@ -91,6 +91,15 @@ class FillerSpeaker:
     def on_new_turn(self, turn_id: int) -> None:
         self.cancel(turn_id)
 
+    def on_transcript(self, turn_id: int) -> None:
+        """Real (recognized) speech arrived — cancel fillers from any OTHER turn.
+
+        VAD noise triggers new turns without transcripts; those must NOT cancel
+        pending fillers, or ambient sound silently kills every filler."""
+        for tid in list(self._pending):
+            if tid != turn_id:
+                self.cancel(tid)
+
     def cancel(self, turn_id: int, only: Optional[str] = None) -> None:
         entry = self._pending.pop(turn_id, None)
         if entry:
