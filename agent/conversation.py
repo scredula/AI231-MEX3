@@ -25,6 +25,8 @@ SYSTEM_PROMPT = (
     "get_time, create_file, edit_file, read_file, list_workspace, run_command, publish_website.\n"
     "For small tasks (a quick script, a one-file fix) do them yourself with create_file/"
     "run_command; for bigger multi-step builds delegate with submit_task or build_website.\n"
+    "Never read a tool's raw output aloud by itself — always work results into a natural "
+    "sentence, and don't give a partial answer before you have everything you need.\n"
     "Publishing to GitHub always requires the user's explicit approval in the conversation — "
     "never call publish_website unless the user has clearly agreed to publish this exact site."
 )

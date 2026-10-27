@@ -106,21 +106,30 @@ function meta(n){
  run_command:['▶️','command'],submit_task:['🗂️','background task'],task_status:['🗂️','task status'],
  task_cancel:['🗑️','task cancel'],build_website:['🌐','build website']};
  return m[n]||['🔧','tool: '+n];}
+function msT(v){return v==null?'—':(v>=1000?(v/1000).toFixed(2)+'s':Math.round(v)+'ms');}
+function tstamp(ev){if(ev.t_ms!=null)return new Date(ev.t_ms).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3});return now();}
 function evtCard(ev,summary,ok){
  const id=ev.id||('t'+(evtSeq++));
  let card=evts.get(id);
  if(!card){card=document.createElement('div');card.className='evt';evts.set(id,card);
   const [ic,label]=meta(ev.name||'');
-  const tm=ev.ts?new Date(ev.ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}):now();
+  const tm=ev.t_ms?new Date(ev.t_ms).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3}):now();
   card.innerHTML='<div class="t"><span class="ic">'+ic+'</span><span class="nm">'+label+'</span>'+
    '<span class="sum"></span><span class="tm">'+tm+'</span><span class="chip run">RUNNING</span></div>'+
    '<details><summary>details</summary><pre></pre></details>';
   card.dataset.sum=summary||'';feed2.appendChild(card);
-  card.querySelector('.sum').textContent=(summary||'').slice(0,80);}
+  card.querySelector('.sum').textContent=((ev.elapsed_ms!=null?'[+'+ev.elapsed_ms+'ms] ':'')+(summary||'')).slice(0,90);}
  const chip=card.querySelector('.chip');
- if(ok===true){const d=ev.duration?(' · '+ev.duration+'s'):'';chip.className='chip ok';chip.textContent='COMPLETED'+d;}
+ if(ok===true){const d=ev.duration?msT(ev.duration*1000):'';chip.className='chip ok';chip.textContent='COMPLETED'+(d?' · '+d:'');}
  else if(ok===false){chip.className='chip fail';chip.textContent='FAILED';}
  return card.querySelector('pre');}
+function tlRow(ev,icon,label,extra){
+ const d=document.createElement('div');d.className='evt';
+ const tm=tstamp(ev);
+ d.innerHTML='<div class="t"><span class="ic">'+icon+'</span><span class="nm">'+label+'</span>'+
+  '<span class="sum"></span><span class="tm">'+tm+'</span>'+(extra||'')+'</div>';
+ d.querySelector('.sum').textContent=(ev.elapsed_ms!=null?'[+'+ev.elapsed_ms+'ms]':'');
+ feed2.appendChild(d);feed2.scrollTop=feed2.scrollHeight;return d;}
 function evtInfo(ev,ok){const pre=evtCard(ev,ev.arguments||ev.query||ev.location||'',ok);
  let s=(ev.arguments||'')+(ev.result?('\\n→ '+ev.result):'');pre.textContent=redact(s);feed2.scrollTop=feed2.scrollHeight;}
 /* tabs (mobile) */
@@ -135,21 +144,28 @@ function state(s){document.getElementById('agentState').textContent=s?'· '+s:''
 /* ---- events ---- */
 es.onmessage=(e)=>{const ev=JSON.parse(e.data);
  switch(ev.type){
-  case 'transcript':ts();bubble('me',ev.text,'u:'+ev.turn+':'+ev.text);state('listening done');break;
+  case 'speech_start':tlRow(ev,'🎤','speech start');break;
+  case 'speech_end':tlRow(ev,'🎤','speech end','<span class="chip unk">'+msT(ev.speech_ms)+'</span>');break;
+  case 'transcript':tlRow(ev,'📝','transcript ready');ts();bubble('me',ev.text,'u:'+ev.turn+':'+ev.text);state('listening done');break;
+  case 'llm_request':tlRow(ev,'🧠','sent to LLM ('+ev.messages.length+' msgs)');break;
+  case 'first_token':tlRow(ev,'⚡','first LLM token');break;
   case 'llm_delta':setTyping(false);state('replying');
    if(!window._live){const live=document.createElement('div');live.className='row bot';
     live.innerHTML='<div class=\"bubble\" id=\"liveb\"></div>';feed.appendChild(live);window._live=live.querySelector('#liveb');}
    window._live.textContent+=ev.delta;feed.scrollTop=feed.scrollHeight;break;
-  case 'bot_speech_start':case 'turn_end':
+  case 'bot_speech_start':
    if(window._live){window._live.removeAttribute('id');window._live=null;}
-   if(ev.type==='bot_speech_start'&&ev.latencies){const l=ev.latencies;state('');
-    let d=document.createElement('div');d.className='sys-note';
-    d.textContent='latency — speech→transcript '+(l.speech_to_transcript==null?'—':(l.speech_to_transcript*1000|0)+'ms')
-     +', LLM→first token '+(l.llm_request_to_first_token==null?'—':(l.llm_request_to_first_token*1000|0)+'ms')
-     +', LLM→spoken '+(l.llm_request_to_bot_speech==null?'—':(l.llm_request_to_bot_speech*1000|0)+'ms')
-     +(l.speech_end_to_bot_speech==null?'':(', TOTAL speech-end→spoken '+(l.speech_end_to_bot_speech*1000|0)+'ms'));
-    feed.appendChild(d);}
+   if(ev.kind==='filler'){tlRow(ev,'🔊','TTS filler spoken');}
+   else {tlRow(ev,'🔊','TTS response spoken');
+    if(ev.latencies){const l=ev.latencies;state('');
+     let d=document.createElement('div');d.className='sys-note';
+     d.textContent='latency — speech→transcript '+(l.speech_to_transcript==null?'—':(l.speech_to_transcript*1000|0)+'ms')
+      +', LLM→first token '+(l.llm_request_to_first_token==null?'—':(l.llm_request_to_first_token*1000|0)+'ms')
+      +', LLM→spoken '+(l.llm_request_to_bot_speech==null?'—':(l.llm_request_to_bot_speech*1000|0)+'ms')
+      +(l.speech_end_to_bot_speech==null?'':(', TOTAL speech-end→spoken '+(l.speech_end_to_bot_speech*1000|0)+'ms'));
+     feed.appendChild(d);}}
    break;
+  case 'turn_end':break;
   case 'tool_running':setTyping(true);state('running '+ev.name);evtInfo(ev,null);break;
   case 'tool_result':evtInfo(ev,ev.ok);break;
   case 'tool_calls_started':break;

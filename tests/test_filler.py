@@ -84,6 +84,26 @@ async def test_llm_error_falls_back_to_canned():
 
 
 @pytest.mark.asyncio
+async def test_bot_speech_end_rearms_when_work_pending():
+    spoken = []
+    s = make_speaker([{"role": "assistant", "content": "still on it"}], spoken)
+    # simulate: tools in flight, bot just finished an intermediate utterance
+    s._tool_starts = {"c1": 0.0}
+    s.on_bot_speech_end(1, work_pending=True)
+    await asyncio.sleep(0.25)
+    assert len(spoken) == 1
+
+
+@pytest.mark.asyncio
+async def test_bot_speech_end_no_rearm_without_work():
+    spoken = []
+    s = make_speaker([{"role": "assistant", "content": "x"}], spoken)
+    s.on_bot_speech_end(1, work_pending=False)
+    await asyncio.sleep(0.25)
+    assert spoken == []
+
+
+@pytest.mark.asyncio
 async def test_disabled_never_speaks():
     spoken = []
     s = FillerSpeaker(speak=spoken.append, client=MockLLMClient([]), thinking_secs=0.05,

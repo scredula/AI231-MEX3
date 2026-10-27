@@ -95,8 +95,11 @@ class VoicePipelineAgent:
                 "use search_web and summarize the "
                 "results in one or two spoken sentences. For quick scripts or one-file fixes, "
                 "use create_file, edit_file, read_file and run_command yourself; leave bigger "
-                "multi-step builds to the background agent with submit_task. Never publish "
-                "anything to GitHub unless the user explicitly approves in this conversation."
+                "multi-step builds to the background agent with submit_task. Never read a "
+                "tool's raw output aloud by itself — always work results into a natural "
+                "sentence, and don't give a partial answer before you have everything you "
+                "need. Never publish anything to GitHub unless the user explicitly approves "
+                "in this conversation."
             ),
         }
 
@@ -323,6 +326,7 @@ class VoicePipelineAgent:
                 obs.bus.publish({"type": "llm_request", "turn": obs.tracker.turn_id,
                                  "messages": _llm_messages(context)})
                 obs.tracker.t_llm_request = _time.monotonic()
+                obs.tracker.t_llm_first_token = None  # per-call stage timing
                 if getattr(obs, "filler", None):
                     obs.filler.on_llm_request(
                         obs.tracker.turn_id, obs.tracker.transcript_text,

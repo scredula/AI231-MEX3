@@ -141,6 +141,7 @@ class DashboardObserver:
         self.tracker = TurnTracker(self._emit)
         self._tool_starts = {}  # tool_call_id -> monotonic start
         self.filler = None      # optional FillerSpeaker, set by the pipeline
+        self._pending_filler_announcement = False
         self._bridge = _PipecatBridge(self)
 
     def pipecat_observer(self):
@@ -160,31 +161,41 @@ class DashboardObserver:
         frame = data.frame
         now = time.monotonic()
         t = self.tracker
+        tms = int(time.time() * 1000)
+        elapsed = None if t.t_user_speech is None else int((now - t.t_user_speech) * 1000)
         if isinstance(frame, UserStartedSpeakingFrame):
             t.new_turn()
+            self._emit({"type": "speech_start", "turn": t.turn_id, "t_ms": tms, "elapsed_ms": 0})
         elif isinstance(frame, UserStoppedSpeakingFrame):
             t.t_speech_end = now
+            self._emit({"type": "speech_end", "turn": t.turn_id, "t_ms": tms,
+                        "elapsed_ms": elapsed,
+                        "speech_ms": int((now - t.t_user_speech) * 1000) if t.t_user_speech else None})
         elif isinstance(frame, TranscriptionFrame):
             t.t_transcript = now
             t.transcript_text = str(getattr(frame, "text", ""))
             if self.filler:
                 self.filler.on_transcript(t.turn_id)  # real speech cancels stale fillers
-            self._emit({"type": "transcript", "turn": t.turn_id, "text": t.transcript_text})
+            self._emit({"type": "transcript", "turn": t.turn_id, "t_ms": tms,
+                        "elapsed_ms": elapsed, "text": t.transcript_text})
         elif isinstance(frame, InterruptionFrame):
             if t.t_bot_speech:
                 t.interrupted = True
-                self._emit({"type": "interruption", "turn": t.turn_id,
+                self._emit({"type": "interruption", "turn": t.turn_id, "t_ms": tms,
+                            "elapsed_ms": elapsed,
                             "interrupt_latency": self.tracker.latencies()["llm_request_to_bot_speech"]})
         elif isinstance(frame, FunctionCallsStartedFrame):
             calls = [{"name": getattr(c, "function_name", "?"),
                       "arguments": str(getattr(c, "arguments", ""))} for c in getattr(frame, "function_calls", [])]
-            self._emit({"type": "tool_calls_started", "turn": t.turn_id, "calls": calls})
+            self._emit({"type": "tool_calls_started", "turn": t.turn_id, "t_ms": tms,
+                        "elapsed_ms": elapsed, "calls": calls})
         elif isinstance(frame, FunctionCallInProgressFrame):
             call_id = str(getattr(frame, "tool_call_id", ""))
             self._tool_starts[call_id] = now
             if self.filler:
                 self.filler.on_tool_running(t.turn_id, getattr(frame, "function_name", "?"))
-            self._emit({"type": "tool_running", "turn": t.turn_id,
+            self._emit({"type": "tool_running", "turn": t.turn_id, "t_ms": tms,
+                        "elapsed_ms": elapsed,
                         "id": call_id,
                         "name": getattr(frame, "function_name", "?"),
                         "arguments": _safe_json(getattr(frame, "arguments", None))})
@@ -194,7 +205,8 @@ class DashboardObserver:
             start = self._tool_starts.pop(call_id, None)
             if self.filler:
                 self.filler.on_tool_done(t.turn_id)  # instant tools don't need fillers
-            self._emit({"type": "tool_result", "turn": t.turn_id,
+            self._emit({"type": "tool_result", "turn": t.turn_id, "t_ms": tms,
+                        "elapsed_ms": elapsed,
                         "id": call_id,
                         "name": getattr(frame, "function_name", "?"),
                         "ok": "error" not in str(result)[:80].lower(),
@@ -206,20 +218,32 @@ class DashboardObserver:
             text = str(getattr(frame, "text", ""))
             if not t.t_llm_first_token:
                 t.t_llm_first_token = now
+                self._emit({"type": "first_token", "turn": t.turn_id, "t_ms": tms,
+                            "elapsed_ms": elapsed})
             t.llm_text += text
             self._emit({"type": "llm_delta", "turn": t.turn_id, "delta": text})
         elif isinstance(frame, BotStartedSpeakingFrame):
             if self.filler:
                 self.filler.on_bot_speech(t.turn_id)
             t.t_bot_speech = now
-            self._emit({"type": "bot_speech_start", "turn": t.turn_id,
+            kind = "filler" if self._pending_filler_announcement else "response"
+            self._pending_filler_announcement = False
+            self._emit({"type": "bot_speech_start", "turn": t.turn_id, "t_ms": tms,
+                        "elapsed_ms": elapsed, "kind": kind,
                         "latencies": t.latencies()})
         elif isinstance(frame, BotStoppedSpeakingFrame):
             t.end_turn()
+            # Work may still be in flight (tools/next LLM call) — re-arm the filler
+            # clock so the user never waits long in silence mid-turn.
+            if self.filler:
+                self.filler.on_bot_speech_end(t.turn_id, work_pending=bool(self._tool_starts))
         elif isinstance(frame, TTSSpeakFrame):
-            self._emit({"type": "announcement", "turn": t.turn_id, "text": str(frame.text)[:300]})
+            self._pending_filler_announcement = True
+            self._emit({"type": "announcement", "turn": t.turn_id, "t_ms": tms,
+                        "elapsed_ms": elapsed, "text": str(frame.text)[:300]})
         elif isinstance(frame, ErrorFrame):
-            self._emit({"type": "error", "turn": t.turn_id, "error": str(frame.error)[:300]})
+            self._emit({"type": "error", "turn": t.turn_id, "t_ms": tms,
+                        "elapsed_ms": elapsed, "error": str(frame.error)[:300]})
 
 
 def _safe_json(obj) -> str:

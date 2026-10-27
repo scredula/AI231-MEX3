@@ -53,7 +53,7 @@ class Config:
     # thinks or tools run. FILLER_MODEL should be a fast, non-thinking model.
     FILLER_ENABLED = _env("FILLER_ENABLED", "1") == "1"
     FILLER_MODEL = _env("FILLER_MODEL", "z-ai/glm-5.3-flash")
-    THINKING_FILLER_SECS = float(_env("THINKING_FILLER_SECS", "5"))
+    THINKING_FILLER_SECS = float(_env("THINKING_FILLER_SECS", "3.5"))
     FILLER_AFTER_SECS = float(_env("FILLER_AFTER_SECS", "1.5"))
 
     # Dashboard

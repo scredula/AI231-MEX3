@@ -30,6 +30,7 @@ TOOL_CANNED = {
     "read_file": "Taking a look.",
     "edit_file": "Making that change.",
     "create_file": "Writing that file.",
+    "_still_working": "Still working on that — one more moment.",
 }
 
 FILLER_SYSTEM = (
@@ -84,6 +85,13 @@ class FillerSpeaker:
     def on_bot_speech(self, turn_id: int) -> None:
         self.cancel(turn_id)
 
+    def on_bot_speech_end(self, turn_id: int, work_pending: bool) -> None:
+        """The bot finished an utterance but work may still be in flight — re-arm
+        the filler clock so the user never waits long in silence mid-turn."""
+        if not self.enabled or not work_pending or turn_id in self._spoken:
+            return
+        self._start(turn_id, self._tool(turn_id, "_still_working"), "tool")
+
     def on_tool_done(self, turn_id: int) -> None:
         """Tool finished — cancel its pending filler (instant tools never speak one)."""
         self.cancel(turn_id, only="tool")
@@ -129,7 +137,7 @@ class FillerSpeaker:
         try:
             await asyncio.sleep(self.tool_secs)
             fallback = TOOL_CANNED.get(tool_name, "One moment.")
-            await self._speak_filler(turn_id, f"(the user asked: {tool_name})", fallback)
+            await self._speak_filler(turn_id, fallback, fallback)
         except asyncio.CancelledError:
             pass
         except Exception:
