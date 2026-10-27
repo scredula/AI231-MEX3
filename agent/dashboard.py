@@ -210,7 +210,7 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
   case 'tool_result':evtInfo(ev,ev.ok);break;
   case 'tool_calls_started':break;
   case 'announcement':{const r=rootOf(ev.turn,ev.text);
-   kid(r,'🔊','filler spoken',ev.text.slice(0,60),null,'model: '+(ev.model||'?')+'\\ntext: '+ev.text);
+   kid(r,'🔊','filler spoken',ev.text.slice(0,60),null,'canned phrase\\ntext: '+ev.text);
    ts();bubble('ann',ev.text,'a:'+ev.turn+':'+ev.text.slice(0,40));break;}
   case 'interruption':ts();bubble('bot err','[interrupted by user]','i:'+ev.turn);break;
   case 'error':{const pre=evtCard({name:'error',id:'err'+ev.turn},ev.error,false);pre.textContent=redact(ev.error);break;}

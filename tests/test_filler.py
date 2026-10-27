@@ -2,8 +2,7 @@ import asyncio
 
 import pytest
 
-from agent.filler import CANNED_THINKING, FillerSpeaker
-from tests.mocks import MockLLMClient
+from agent.filler import CANNED_THINKING, FillerSpeaker, TOOL_CANNED
 
 
 async def collect(s, seconds=0.4, arm=None):
@@ -22,25 +21,30 @@ async def collect(s, seconds=0.4, arm=None):
     return spoken
 
 
-def make(always, script=None, **kw):
+def make(always, **kw):
     kw.setdefault("tool_secs", 0.05)
-    return FillerSpeaker(speak=lambda t: asyncio.sleep(0),
-                         client=MockLLMClient(list(script or [])),
-                         always=always, **kw)
+    return FillerSpeaker(speak=lambda t: asyncio.sleep(0), always=always, **kw)
 
 
 # ---------------- always mode (default) ----------------
 
 @pytest.mark.asyncio
 async def test_always_filler_fires_immediately_after_transcript():
-    s = make(True, [{"role": "assistant", "content": "Let me look that up for you."}])
+    s = make(True)
     spoken = await collect(s, arm=lambda: s.on_transcript(1, "What is Florida's record?"))
-    assert len(spoken) == 1 and "look" in spoken[0].lower()
+    assert len(spoken) == 1 and spoken[0] in CANNED_THINKING
+
+
+@pytest.mark.asyncio
+async def test_always_filler_is_canned_no_model():
+    s = make(True)
+    spoken = await collect(s, arm=lambda: s.on_transcript(1, "hello"))
+    assert spoken[0] in CANNED_THINKING  # never anything model-generated
 
 
 @pytest.mark.asyncio
 async def test_always_filler_not_cancelled_by_first_token():
-    s = make(True, [{"role": "assistant", "content": "One moment."}])
+    s = make(True)
     spoken = await collect(s, 0.3, arm=lambda: (s.on_transcript(1, "hello"),
                                                 s.on_first_token(1)))
     assert len(spoken) == 1  # real response starts — immediate filler still speaks
@@ -48,14 +52,14 @@ async def test_always_filler_not_cancelled_by_first_token():
 
 @pytest.mark.asyncio
 async def test_always_no_llm_request_filler():
-    s = make(True, [{"role": "assistant", "content": "x"}])
+    s = make(True)
     spoken = await collect(s, arm=lambda: s.on_llm_request(1, "hi"))
     assert spoken == []  # armed at the transcript, not per LLM call
 
 
 @pytest.mark.asyncio
 async def test_always_no_tool_filler_after_immediate():
-    s = make(True, [{"role": "assistant", "content": "immediate"}], tool_secs=0.02)
+    s = make(True, tool_secs=0.02)
 
     async def arm():
         s.on_transcript(1, "search for news")
@@ -67,20 +71,19 @@ async def test_always_no_tool_filler_after_immediate():
 
 @pytest.mark.asyncio
 async def test_always_still_working_after_utterance():
-    s = make(True, [{"role": "assistant", "content": "immediate"}], tool_secs=0.02)
+    s = make(True, tool_secs=0.02)
 
     async def arm():
         s.on_transcript(1, "do a long task")
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)   # immediate filler (0.2s lead-in) speaks
         s.on_bot_speech_end(1, work_pending=True)
     spoken = await collect(s, 0.3, arm)
-    assert len(spoken) == 2 and "working" in spoken[1].lower()
+    assert len(spoken) == 2 and spoken[1] == TOOL_CANNED["_still_working"]
 
 
 @pytest.mark.asyncio
 async def test_cap_limits_fillers_per_turn():
-    s = make(True, [{"role": "assistant", "content": "f"}], max_per_turn=2,
-             tool_secs=0.02)
+    s = make(True, max_per_turn=2, tool_secs=0.02)
 
     async def arm():
         s.on_transcript(1, "q")
@@ -98,16 +101,14 @@ async def test_cap_limits_fillers_per_turn():
 
 @pytest.mark.asyncio
 async def test_threshold_thinking_filler_fires():
-    s = make(False, [{"role": "assistant", "content": "Let me consider that."}],
-             thinking_secs=0.05)
+    s = make(False, thinking_secs=0.05)
     spoken = await collect(s, arm=lambda: s.on_llm_request(1, "what is quantum computing?"))
-    assert len(spoken) == 1 and "consider" in spoken[0].lower()
+    assert len(spoken) == 1 and spoken[0] in CANNED_THINKING
 
 
 @pytest.mark.asyncio
 async def test_threshold_first_token_cancels_thinking():
-    s = make(False, [{"role": "assistant", "content": "slow filler"}],
-             thinking_secs=5.0)
+    s = make(False, thinking_secs=5.0)
     spoken = await collect(s, 0.2, arm=lambda: (s.on_llm_request(1, "hello"),
                                                 s.on_first_token(1)))
     assert spoken == []
@@ -115,41 +116,44 @@ async def test_threshold_first_token_cancels_thinking():
 
 @pytest.mark.asyncio
 async def test_threshold_transcript_alone_does_not_speak():
-    s = make(False, [{"role": "assistant", "content": "x"}], thinking_secs=0.05)
+    s = make(False, thinking_secs=0.05)
     spoken = await collect(s, arm=lambda: s.on_transcript(1, "hello"))
     assert spoken == []  # threshold mode: the LLM request is the trigger, not STT
 
 
 @pytest.mark.asyncio
-async def test_threshold_tool_filler_canned_when_no_llm_text():
-    s = make(False, [{"role": "assistant", "content": ""}], tool_secs=0.05)
+async def test_threshold_tool_filler_canned():
+    s = make(False, tool_secs=0.05)
     spoken = await collect(s, 0.3, arm=lambda: (s.on_llm_request(1, "search news"),
                                                 s.on_first_token(1),
                                                 s.on_tool_running(1, "search_web")))
-    assert len(spoken) == 1 and "search" in spoken[0].lower()
+    assert len(spoken) == 1 and spoken[0] == TOOL_CANNED["search_web"]
 
 
 # ---------------- shared behavior ----------------
 
 @pytest.mark.asyncio
-async def test_filler_model_error_falls_back_to_canned():
-    class Failing:
-        async def chat(self, *a, **kw):
-            raise RuntimeError("down")
-    s = FillerSpeaker(speak=lambda t: asyncio.sleep(0), client=Failing(),
-                      always=True, tool_secs=0.02)
-    spoken = await collect(s, 0.3, arm=lambda: s.on_transcript(1, "hi"))
-    assert len(spoken) == 1 and spoken[0] in CANNED_THINKING
+async def test_tool_done_cancels_pending_tool_filler():
+    s = make(False, tool_secs=5.0)  # filler would fire long after the tool
+    spoken = await collect(s, 0.3, arm=lambda: (s.on_llm_request(1, "q"),
+                                                s.on_first_token(1),
+                                                s.on_tool_running(1, "search_web"),
+                                                s.on_tool_done(1)))
+    assert spoken == []  # instant/finished tools never speak fillers
 
 
 @pytest.mark.asyncio
 async def test_disabled_never_speaks():
-    s = make(True, [{"role": "assistant", "content": "x"}], enabled=False)
+    s = make(True, enabled=False)
     spoken = await collect(s, arm=lambda: s.on_transcript(1, "hi"))
     assert spoken == []
 
 
-def test_filler_system_prompt_caps_words():
-    from agent.filler import FILLER_SYSTEM
-    assert "6 words" in FILLER_SYSTEM
-    assert "NEVER answer the user's question" in FILLER_SYSTEM
+def test_no_filler_model_anywhere():
+    """The canned-only refactor must have removed the filler model entirely."""
+    import inspect
+    import agent.filler as f
+    src = inspect.getsource(f)
+    assert "OpenRouterClient" not in src
+    assert "FILLER_MODEL" not in src
+    assert "client.chat" not in src

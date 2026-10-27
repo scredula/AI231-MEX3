@@ -1,14 +1,16 @@
-"""Voice fillers while the slow model thinks / tools run.
+"""Voice fillers while the slow model thinks / tools run — CANNED ONLY.
+
+No filler model: fillers are short fixed phrases spoken via TTSSpeakFrame (never
+added to the LLM context), so behavior is fully deterministic.
 
 Two modes (FILLER_ALWAYS):
-- always=1 (default): immediately after a transcript is recognized, the fast model
-  (FILLER_MODEL, no thinking) generates a short acknowledgment that is spoken at once.
-  The real answer plays after it (pipecat serializes TTS contexts). Mid-turn, canned
-  "still working" fillers re-arm after each utterance while work is pending.
-- always=0: legacy threshold behavior — thinking fillers after THINKING_FILLER_SECS.
+- always=1 (default): immediately after a transcript is recognized, a canned
+  acknowledgment is spoken at once. The real answer plays after it (pipecat
+  serializes TTS contexts). Mid-turn, "still working" fillers re-arm after each
+  utterance while tools are pending.
+- always=0: legacy threshold behavior — a canned filler after THINKING_FILLER_SECS.
 
-Fillers are TTSSpeakFrame-only: spoken to the user, never added to the LLM context.
-Canned fallback if the filler model is slow/unavailable. Hard cap: FILLER_MAX_PER_TURN.
+Hard cap per turn: FILLER_MAX_PER_TURN. Kill switch: FILLER_ENABLED=0.
 """
 import asyncio
 import logging
@@ -16,7 +18,6 @@ import random
 from typing import Callable, Optional
 
 from agent.config import Config
-from services.llm_client import OpenRouterClient, LLMError
 
 log = logging.getLogger("filler")
 
@@ -39,21 +40,11 @@ TOOL_CANNED = {
 
 FILLER_TOOLS = set(TOOL_CANNED) | {"get_weather", "get_time"}
 
-FILLER_SYSTEM = (
-    "You generate tiny spoken acknowledgments for a voice assistant while its main "
-    "model prepares a full answer. Reply with exactly ONE very short sentence, "
-    "maximum 6 words, casual and conversational, acknowledging that you are working "
-    "on what the user asked. NEVER answer the user's question yourself — you do not "
-    "have any information; only promise to look into it. No emojis, no lists, no "
-    "quotes, no question marks. Never apologize, never react to anything except the "
-    "user's request itself. Examples: 'Let me look that up.', 'Good question, one "
-    "moment.', 'Checking on that now.'"
-)
-
 
 class FillerSpeaker:
+    """Canned-only filler speaker. No LLM calls — fully deterministic."""
+
     def __init__(self, speak: Callable[[str], "asyncio.Future"],
-                 client: Optional[OpenRouterClient] = None,
                  thinking_secs: float = None, tool_secs: float = None,
                  enabled: bool = True, always: Optional[bool] = None,
                  max_per_turn: int = None):
@@ -63,11 +54,8 @@ class FillerSpeaker:
         self.thinking_secs = thinking_secs if thinking_secs is not None else Config.THINKING_FILLER_SECS
         self.tool_secs = tool_secs if tool_secs is not None else Config.FILLER_AFTER_SECS
         self.max_per_turn = max_per_turn if max_per_turn is not None else Config.FILLER_MAX_PER_TURN
-        self.client = client or OpenRouterClient(model=Config.FILLER_MODEL)
         self._pending: dict = {}          # turn_id -> (asyncio.Task, kind)
         self._counts: dict = {}           # turn_id -> fillers spoken
-        self._immediate_spoken: set = set()
-        self._last_transcript: str = ""   # latest real user text
 
     # ---- hooks called from the pipeline observer / LLM wrapper ----
     def on_llm_request(self, turn_id: int, user_text: str, already_spoken: bool = False) -> None:
@@ -75,13 +63,11 @@ class FillerSpeaker:
             return  # always-mode arms the filler at the transcript instead
         if already_spoken or turn_id in self._pending:
             return
-        self._start(turn_id, self._thinking(turn_id, user_text), "thinking")
+        self._start(turn_id, self._thinking(turn_id), "thinking")
 
     def on_transcript(self, turn_id: int, text: str = "") -> None:
         """Real (recognized) speech arrived. In always-mode this triggers the
-        immediate filler; in threshold mode it arms the thinking filler."""
-        if text:
-            self._last_transcript = text
+        immediate canned filler; in threshold mode it does nothing."""
         for tid in list(self._pending):
             if tid != turn_id:
                 self.cancel(tid)
@@ -89,9 +75,8 @@ class FillerSpeaker:
             self._start(turn_id, self._immediate(turn_id), "immediate")
 
     def on_first_token(self, turn_id: int) -> None:
-        """Real answer audio is coming. Cancel thinking fillers (threshold mode)
-        and tool fillers queued behind the response. The immediate filler
-        (always-mode) always speaks."""
+        """Real answer audio is coming — cancel pending thinking/tool fillers so
+        they don't play after the response. The immediate filler always speaks."""
         self.cancel(turn_id, only="thinking")
         self.cancel(turn_id, only="tool")
 
@@ -100,14 +85,7 @@ class FillerSpeaker:
             return
         if turn_id in self._pending:
             return  # something is already armed for this turn
-        if self.always and self._counts.get(turn_id, 0) > 0:
-            return  # always-mode: the immediate filler already acknowledged — no
-            # mid-turn tool fillers (they delay short tools and add chatter)
-        if turn_id in self._counts and self._counts[turn_id] > 0:
-            # threshold mode: canned only (filler model must not react twice)
-            self._start(turn_id, self._canned_only(turn_id, TOOL_CANNED.get(tool_name, "One moment.")), "tool")
-        else:
-            self._start(turn_id, self._tool(turn_id, tool_name), "tool")
+        self._start(turn_id, self._canned_only(turn_id, TOOL_CANNED.get(tool_name, "One moment.")), "tool")
 
     def on_bot_speech(self, turn_id: int) -> None:
         self.cancel(turn_id, only="tool")
@@ -118,8 +96,7 @@ class FillerSpeaker:
 
     def on_bot_speech_end(self, turn_id: int, work_pending: bool) -> None:
         """The bot finished an utterance but work may still be in flight — re-arm
-        the filler clock so the user never waits long in silence mid-turn.
-        Canned only: the filler model must never 'react' to fake input."""
+        the filler clock so the user never waits long in silence mid-turn."""
         if not self.enabled or not work_pending or self._at_cap(turn_id):
             return
         if turn_id in self._pending:
@@ -153,77 +130,28 @@ class FillerSpeaker:
             return False
         return True
 
-    def _finish_speaking(self, turn_id: int) -> None:
-        entry = self._pending.get(turn_id)
-        if entry and entry[0] is asyncio.current_task():
-            self._pending.pop(turn_id, None)
-
     async def _speak_canned(self, turn_id: int, phrase: str) -> None:
         if not self._speak_allowed(turn_id):
             return
-        self._finish_speaking(turn_id)
+        self._pending.pop(turn_id, None)
         self._counts[turn_id] = self._counts.get(turn_id, 0) + 1
         await self.speak(phrase)
-
-    async def _speak_filler(self, turn_id: int, user_text: str, fallback) -> None:
-        if not self._speak_allowed(turn_id):
-            return
-        text = None
-        try:
-            msg = await asyncio.wait_for(
-                self.client.chat(
-                    [{"role": "system", "content": FILLER_SYSTEM},
-                     {"role": "user", "content": user_text[:300]}],
-                    temperature=0.9),
-                timeout=4.0)
-            text = (msg.get("content") or "").strip().strip('"')
-            if not text or len(text) > 60 or "\n" in text:
-                text = None  # too long (likely tried to answer) or malformed — canned
-        except (LLMError, asyncio.TimeoutError, Exception) as e:
-            log.debug("filler model unavailable (%s) — using canned", e)
-        if not self._speak_allowed(turn_id):
-            return  # raced with a real response / cap
-        self._finish_speaking(turn_id)
-        self._counts[turn_id] = self._counts.get(turn_id, 0) + 1
-        if not text:
-            text = random.choice(fallback) if isinstance(fallback, list) else fallback
-        await self.speak(text)
 
     # ---- tasks ----
     async def _immediate(self, turn_id: int) -> None:
         try:
-            user_text = self._last_transcript
-            if user_text:
-                await self._speak_filler(turn_id, user_text, CANNED_THINKING)
-            else:
-                await self._speak_canned(turn_id, random.choice(CANNED_THINKING))
+            # tiny delay so the immediate filler never pre-empts audio setup
+            await asyncio.sleep(0.2)
+            await self._speak_canned(turn_id, random.choice(CANNED_THINKING))
         except asyncio.CancelledError:
             pass
-        except Exception:
-            log.exception("immediate filler failed")
 
-    async def _thinking(self, turn_id: int, user_text: str) -> None:
+    async def _thinking(self, turn_id: int) -> None:
         try:
             await asyncio.sleep(self.thinking_secs)
-            await self._speak_filler(turn_id, user_text, CANNED_THINKING)
+            await self._speak_canned(turn_id, random.choice(CANNED_THINKING))
         except asyncio.CancelledError:
             pass
-        except Exception:
-            log.exception("thinking filler failed")
-
-    async def _tool(self, turn_id: int, tool_name: str) -> None:
-        try:
-            await asyncio.sleep(self.tool_secs)
-            fallback = TOOL_CANNED.get(tool_name, "One moment.")
-            user_text = self._last_transcript or ""
-            if user_text:
-                await self._speak_filler(turn_id, user_text, fallback)
-            else:
-                await self._speak_canned(turn_id, fallback)
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            log.exception("tool filler failed")
 
     async def _canned_only(self, turn_id: int, phrase: str) -> None:
         try:
