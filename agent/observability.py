@@ -13,6 +13,8 @@ import threading
 import time
 from typing import Optional
 
+from agent.config import Config
+
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame, BotStoppedSpeakingFrame, ErrorFrame,
     FunctionCallInProgressFrame, FunctionCallResultFrame, FunctionCallsStartedFrame,
@@ -191,13 +193,14 @@ class DashboardObserver:
                         "elapsed_ms": elapsed, "calls": calls})
         elif isinstance(frame, FunctionCallInProgressFrame):
             call_id = str(getattr(frame, "tool_call_id", ""))
-            self._tool_starts[call_id] = now
+            self._tool_starts[call_id] = (now, tms)
             if self.filler:
                 self.filler.on_tool_running(t.turn_id, getattr(frame, "function_name", "?"))
             self._emit({"type": "tool_running", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed,
                         "id": call_id,
                         "name": getattr(frame, "function_name", "?"),
+                        "start_ms": tms,
                         "arguments": _safe_json(getattr(frame, "arguments", None))})
         elif isinstance(frame, FunctionCallResultFrame):
             result = getattr(frame, "result", "")
@@ -209,9 +212,10 @@ class DashboardObserver:
                         "elapsed_ms": elapsed,
                         "id": call_id,
                         "name": getattr(frame, "function_name", "?"),
+                        "start_ms": start[1] if start else None,
                         "ok": "error" not in str(result)[:80].lower(),
-                        "duration": round(now - start, 3) if start is not None else None,
-                        "result": str(result)[:500]})
+                        "duration": round(now - start[0], 3) if start else None,
+                        "result": str(result)[:2000]})
         elif isinstance(frame, LLMTextFrame):
             if self.filler:
                 self.filler.on_first_token(t.turn_id)
@@ -219,7 +223,7 @@ class DashboardObserver:
             if not t.t_llm_first_token:
                 t.t_llm_first_token = now
                 self._emit({"type": "first_token", "turn": t.turn_id, "t_ms": tms,
-                            "elapsed_ms": elapsed})
+                            "elapsed_ms": elapsed, "model": Config.FAST_MODEL})
             t.llm_text += text
             self._emit({"type": "llm_delta", "turn": t.turn_id, "delta": text})
         elif isinstance(frame, BotStartedSpeakingFrame):
@@ -229,7 +233,7 @@ class DashboardObserver:
             kind = "filler" if self._pending_filler_announcement else "response"
             self._pending_filler_announcement = False
             self._emit({"type": "bot_speech_start", "turn": t.turn_id, "t_ms": tms,
-                        "elapsed_ms": elapsed, "kind": kind,
+                        "elapsed_ms": elapsed, "kind": kind, "model": Config.FAST_MODEL,
                         "latencies": t.latencies()})
         elif isinstance(frame, BotStoppedSpeakingFrame):
             t.end_turn()
@@ -240,7 +244,8 @@ class DashboardObserver:
         elif isinstance(frame, TTSSpeakFrame):
             self._pending_filler_announcement = True
             self._emit({"type": "announcement", "turn": t.turn_id, "t_ms": tms,
-                        "elapsed_ms": elapsed, "text": str(frame.text)[:300]})
+                        "elapsed_ms": elapsed, "text": str(frame.text)[:300],
+                        "model": Config.FILLER_MODEL})
         elif isinstance(frame, ErrorFrame):
             self._emit({"type": "error", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed, "error": str(frame.error)[:300]})

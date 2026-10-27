@@ -129,11 +129,24 @@ function evtCard(ev,summary,ok){
  if(ok===true){const d=ev.duration?msT(ev.duration*1000):'';chip.className='chip ok';chip.textContent='COMPLETED'+(d?' · '+d:'');}
  else if(ok===false){chip.className='chip fail';chip.textContent='FAILED';}
  return card.querySelector('pre');}
-function kid(root,icon,label,detail,chipHtml){
+function toolDetails(ev,ok){
+ const lines=[];
+ if(ev.id)lines.push('call_id: '+ev.id);
+ if(ev.start_ms)lines.push('started: '+new Date(ev.start_ms).toLocaleTimeString([],{fractionalSecondDigits:3}));
+ if(ev.t_ms&&ev.start_ms)lines.push('ended:   '+new Date(ev.t_ms).toLocaleTimeString([],{fractionalSecondDigits:3}));
+ if(ev.duration!=null)lines.push('duration: '+msT(ev.duration*1000));
+ lines.push('status: '+(ok===true?'completed':(ok===false?'failed':'running')));
+ if(ev.arguments)lines.push('args: '+ev.arguments);
+ if(ev.result)lines.push('result:\n'+ev.result);
+ return redact(lines.join('\n'));}
+function kid(root,icon,label,detail,chipHtml,expandText){
  const d=document.createElement('div');d.className='evt kid';
- d.innerHTML='<div class="t"><span class="ic">'+icon+'</span><span class="nm">'+label+'</span>'+
+ let inner='<div class="t"><span class="ic">'+icon+'</span><span class="nm">'+label+'</span>'+
   '<span class="sum"></span><span class="tm">'+now()+'</span>'+(chipHtml||'')+'</div>';
+ if(expandText)inner+='<details><summary>details</summary><pre></pre></details>';
+ d.innerHTML=inner;
  d.querySelector('.sum').textContent=detail||'';
+ if(expandText)d.querySelector('pre').textContent=redact(expandText);
  root.querySelector('.kids').appendChild(d);feed2.scrollTop=feed2.scrollHeight;return d;}
 function turnRoot(ev,text){
  const card=document.createElement('div');card.className='evt root';
@@ -143,8 +156,7 @@ function turnRoot(ev,text){
   '<div class="root-meta"></div><div class="kids"></div>';
  card.querySelector('.root-text').textContent=text;
  feed2.appendChild(card);feed2.scrollTop=feed2.scrollHeight;return card;}
-function evtInfo(ev,ok){const pre=evtCard(ev,ev.arguments||ev.query||ev.location||'',ok);
- let s=(ev.arguments||'')+(ev.result?('\\n→ '+ev.result):'');pre.textContent=redact(s);feed2.scrollTop=feed2.scrollHeight;}
+function evtInfo(ev,ok){const pre=evtCard(ev,ev.arguments||'',ok);pre.textContent=toolDetails(ev,ok);feed2.scrollTop=feed2.scrollHeight;}
 /* tabs (mobile) */
 const tabs=document.getElementById('tabs');
 tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{
@@ -169,16 +181,22 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
    break;}
   case 'llm_request':window._lastLlmReq[ev.turn]=ev.t_ms;break;
   case 'first_token':{const t0=window._lastLlmReq[ev.turn];
-   if(t0&&ev.t_ms-t0>0)kid(rootOf(ev.turn),'🧠','LLM think',msT(ev.t_ms-t0));break;}
+   const think=t0&&ev.t_ms-t0>0?msT(ev.t_ms-t0):null;
+   kid(rootOf(ev.turn),'🧠','LLM think',think,
+    null,think?('model: '+(ev.model||'?')+'\nthink time: '+think):null);break;}
   case 'llm_delta':setTyping(false);state('replying');
    if(!window._live){const live=document.createElement('div');live.className='row bot';
     live.innerHTML='<div class=\"bubble\" id=\"liveb\"></div>';feed.appendChild(live);window._live=live.querySelector('#liveb');}
    window._live.textContent+=ev.delta;feed.scrollTop=feed.scrollHeight;break;
   case 'bot_speech_start':
    if(window._live){window._live.removeAttribute('id');window._live=null;}
-   if(ev.kind==='filler'){kid(rootOf(ev.turn),'🔊','TTS filler',ev.latencies?msT((ev.latencies.llm_request_to_bot_speech||0)*1000):'');}
-   else{const r=rootOf(ev.turn);kid(r,'🔊','TTS response',
-     ev.latencies&&ev.latencies.llm_request_to_bot_speech!=null?msT(ev.latencies.llm_request_to_bot_speech*1000)+' after last LLM call':'');
+   if(ev.kind==='filler'){kid(rootOf(ev.turn),'🔊','TTS filler',
+     ev.latencies?msT((ev.latencies.llm_request_to_bot_speech||0)*1000):'',
+     null,'text spoken while work continues');}
+   else{const r=rootOf(ev.turn);
+    const lts=ev.latencies&&ev.latencies.llm_request_to_bot_speech!=null?msT(ev.latencies.llm_request_to_bot_speech*1000):null;
+    kid(r,'🔊','TTS response',lts?lts+' after last LLM call':'',
+     null,'model: '+(ev.model||'?')+(lts?'\nLLM→TTS: '+lts:''));
     const tot=document.getElementById('tot-'+ev.turn);
     if(tot&&ev.latencies&&ev.latencies.speech_end_to_bot_speech!=null){
      tot.className='chip ok';tot.textContent='TOTAL '+msT(ev.latencies.speech_end_to_bot_speech*1000);}
@@ -191,7 +209,8 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
   case 'tool_running':setTyping(true);state('running '+ev.name);evtInfo(ev,null);break;
   case 'tool_result':evtInfo(ev,ev.ok);break;
   case 'tool_calls_started':break;
-  case 'announcement':{const r=rootOf(ev.turn,ev.text);kid(r,'🔊','filler spoken',ev.text.slice(0,60));
+  case 'announcement':{const r=rootOf(ev.turn,ev.text);
+   kid(r,'🔊','filler spoken',ev.text.slice(0,60),null,'model: '+(ev.model||'?')+'\ntext: '+ev.text);
    ts();bubble('ann',ev.text,'a:'+ev.turn+':'+ev.text.slice(0,40));break;}
   case 'interruption':ts();bubble('bot err','[interrupted by user]','i:'+ev.turn);break;
   case 'error':{const pre=evtCard({name:'error',id:'err'+ev.turn},ev.error,false);pre.textContent=redact(ev.error);break;}

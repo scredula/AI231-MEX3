@@ -324,6 +324,8 @@ class VoicePipelineAgent:
             obs = getattr(llm, "_observer", None)
             if obs is not None:
                 obs.bus.publish({"type": "llm_request", "turn": obs.tracker.turn_id,
+                                 "t_ms": int(_time.time() * 1000),
+                                 "model": Config.FAST_MODEL,
                                  "messages": _llm_messages(context)})
                 obs.tracker.t_llm_request = _time.monotonic()
                 obs.tracker.t_llm_first_token = None  # per-call stage timing
