@@ -49,6 +49,13 @@ class Config:
     # cutting you off (lower = snappier, higher = more patient).
     TURN_STOP_SECS = float(_env("TURN_STOP_SECS", "0.8"))
 
+    # Voice fillers: contextual "one moment…" lines spoken while the slow model
+    # thinks or tools run. FILLER_MODEL should be a fast, non-thinking model.
+    FILLER_ENABLED = _env("FILLER_ENABLED", "1") == "1"
+    FILLER_MODEL = _env("FILLER_MODEL", "z-ai/glm-5.3-flash")
+    THINKING_FILLER_SECS = float(_env("THINKING_FILLER_SECS", "5"))
+    FILLER_AFTER_SECS = float(_env("FILLER_AFTER_SECS", "1.5"))
+
     # Dashboard
     DASHBOARD_PORT = int(_env("DASHBOARD_PORT", "8900"))
 

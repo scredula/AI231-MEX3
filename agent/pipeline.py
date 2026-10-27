@@ -232,6 +232,13 @@ class VoicePipelineAgent:
         ])
         worker = PipelineWorker(pipeline, observers=[observer.pipecat_observer()])
 
+        # voice fillers while the slow model thinks / tools run
+        from agent.filler import FillerSpeaker
+        filler = FillerSpeaker(
+            speak=lambda text: asyncio.get_event_loop().create_task(
+                worker.queue_frame(TTSSpeakFrame(text))))
+        observer.filler = filler
+
         def announce(text: str) -> None:
             """Speak a task announcement without blocking the pipeline."""
             loop = asyncio.get_event_loop()
@@ -247,8 +254,9 @@ class VoicePipelineAgent:
             """Inject typed text from the dashboard as a synthetic transcript.
 
             TranscriptionFrame (not TextFrame) so the aggregator treats it as user
-            speech and TTS doesn't read it back aloud."""
-            await worker.queue_frame(TranscriptionFrame(text, "", 16000))
+            speech and TTS doesn't read it back aloud. timestamp must be a str —
+            an int crashes the RTVI turn-tracking observer's pydantic validation."""
+            await worker.queue_frame(TranscriptionFrame(text, "", "0"))
 
         dashboard = DashboardServer(bus, say_handler=say)
         dashboard.start()
@@ -315,6 +323,10 @@ class VoicePipelineAgent:
                 obs.bus.publish({"type": "llm_request", "turn": obs.tracker.turn_id,
                                  "messages": _llm_messages(context)})
                 obs.tracker.t_llm_request = _time.monotonic()
+                if getattr(obs, "filler", None):
+                    obs.filler.on_llm_request(
+                        obs.tracker.turn_id, obs.tracker.transcript_text,
+                        already_spoken=obs.tracker.t_bot_speech is not None)
             return await llm.__class__.get_chat_completions(llm, context)
 
         return wrapped

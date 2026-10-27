@@ -140,6 +140,7 @@ class DashboardObserver:
         self.bus = bus
         self.tracker = TurnTracker(self._emit)
         self._tool_starts = {}  # tool_call_id -> monotonic start
+        self.filler = None      # optional FillerSpeaker, set by the pipeline
         self._bridge = _PipecatBridge(self)
 
     def pipecat_observer(self):
@@ -160,8 +161,8 @@ class DashboardObserver:
         now = time.monotonic()
         t = self.tracker
         if isinstance(frame, UserStartedSpeakingFrame):
-            if t.t_bot_speech and not t.tts_contexts_done:
-                pass
+            if self.filler:
+                self.filler.on_new_turn(t.turn_id)
             t.new_turn()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             t.t_speech_end = now
@@ -181,6 +182,8 @@ class DashboardObserver:
         elif isinstance(frame, FunctionCallInProgressFrame):
             call_id = str(getattr(frame, "tool_call_id", ""))
             self._tool_starts[call_id] = now
+            if self.filler:
+                self.filler.on_tool_running(t.turn_id, getattr(frame, "function_name", "?"))
             self._emit({"type": "tool_running", "turn": t.turn_id,
                         "id": call_id,
                         "name": getattr(frame, "function_name", "?"),
@@ -196,12 +199,16 @@ class DashboardObserver:
                         "duration": round(now - start, 3) if start is not None else None,
                         "result": str(result)[:500]})
         elif isinstance(frame, LLMTextFrame):
+            if self.filler:
+                self.filler.on_first_token(t.turn_id)
             text = str(getattr(frame, "text", ""))
             if not t.t_llm_first_token:
                 t.t_llm_first_token = now
             t.llm_text += text
             self._emit({"type": "llm_delta", "turn": t.turn_id, "delta": text})
         elif isinstance(frame, BotStartedSpeakingFrame):
+            if self.filler:
+                self.filler.on_bot_speech(t.turn_id)
             t.t_bot_speech = now
             self._emit({"type": "bot_speech_start", "turn": t.turn_id,
                         "latencies": t.latencies()})
