@@ -137,8 +137,8 @@ function toolDetails(ev,ok){
  if(ev.duration!=null)lines.push('duration: '+msT(ev.duration*1000));
  lines.push('status: '+(ok===true?'completed':(ok===false?'failed':'running')));
  if(ev.arguments)lines.push('args: '+ev.arguments);
- if(ev.result)lines.push('result:\n'+ev.result);
- return redact(lines.join('\n'));}
+ if(ev.result)lines.push('result:\\n'+ev.result);
+ return redact(lines.join('\\n'));}
 function kid(root,icon,label,detail,chipHtml,expandText){
  const d=document.createElement('div');d.className='evt kid';
  let inner='<div class="t"><span class="ic">'+icon+'</span><span class="nm">'+label+'</span>'+
@@ -183,7 +183,7 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
   case 'first_token':{const t0=window._lastLlmReq[ev.turn];
    const think=t0&&ev.t_ms-t0>0?msT(ev.t_ms-t0):null;
    kid(rootOf(ev.turn),'🧠','LLM think',think,
-    null,think?('model: '+(ev.model||'?')+'\nthink time: '+think):null);break;}
+    null,think?('model: '+(ev.model||'?')+'\\nthink time: '+think):null);break;}
   case 'llm_delta':setTyping(false);state('replying');
    if(!window._live){const live=document.createElement('div');live.className='row bot';
     live.innerHTML='<div class=\"bubble\" id=\"liveb\"></div>';feed.appendChild(live);window._live=live.querySelector('#liveb');}
@@ -196,7 +196,7 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
    else{const r=rootOf(ev.turn);
     const lts=ev.latencies&&ev.latencies.llm_request_to_bot_speech!=null?msT(ev.latencies.llm_request_to_bot_speech*1000):null;
     kid(r,'🔊','TTS response',lts?lts+' after last LLM call':'',
-     null,'model: '+(ev.model||'?')+(lts?'\nLLM→TTS: '+lts:''));
+     null,'model: '+(ev.model||'?')+(lts?'\\nLLM→TTS: '+lts:''));
     const tot=document.getElementById('tot-'+ev.turn);
     if(tot&&ev.latencies&&ev.latencies.speech_end_to_bot_speech!=null){
      tot.className='chip ok';tot.textContent='TOTAL '+msT(ev.latencies.speech_end_to_bot_speech*1000);}
@@ -210,7 +210,7 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
   case 'tool_result':evtInfo(ev,ev.ok);break;
   case 'tool_calls_started':break;
   case 'announcement':{const r=rootOf(ev.turn,ev.text);
-   kid(r,'🔊','filler spoken',ev.text.slice(0,60),null,'model: '+(ev.model||'?')+'\ntext: '+ev.text);
+   kid(r,'🔊','filler spoken',ev.text.slice(0,60),null,'model: '+(ev.model||'?')+'\\ntext: '+ev.text);
    ts();bubble('ann',ev.text,'a:'+ev.turn+':'+ev.text.slice(0,40));break;}
   case 'interruption':ts();bubble('bot err','[interrupted by user]','i:'+ev.turn);break;
   case 'error':{const pre=evtCard({name:'error',id:'err'+ev.turn},ev.error,false);pre.textContent=redact(ev.error);break;}

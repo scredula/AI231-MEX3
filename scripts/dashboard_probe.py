@@ -29,6 +29,17 @@ async def main() -> None:
     assert r.status_code == 200 and "Agent activity" in r.content.decode() and "bubble" in r.content.decode()
     print("GET / ok,", len(r.content), "bytes, new UI markers present")
 
+    # guard: the inline JS must be syntactically valid (a broken script silently
+    # leaves the UI stuck on 'connecting…')
+    import re as _re
+    import subprocess
+    js = _re.search(r"<script>(.*?)</script>", r.content.decode(), _re.S).group(1)
+    Path("logs").mkdir(exist_ok=True)
+    Path("logs/ui_check.js").write_text(js, encoding="utf-8")
+    chk = subprocess.run(["node", "--check", "logs/ui_check.js"], capture_output=True, text=True)
+    assert chk.returncode == 0, f"dashboard JS syntax error:\n{chk.stderr[:400]}"
+    print("dashboard JS syntax OK")
+
     r = await c.post("http://127.0.0.1:8916/say", json={"text": "hello dashboard"})
     print("POST /say:", r.status_code, r.json(), "| handler got:", said)
 
