@@ -51,10 +51,14 @@ class Config:
 
     # Voice fillers: contextual "one moment…" lines spoken while the slow model
     # thinks or tools run. FILLER_MODEL should be a fast, non-thinking model.
+    # FILLER_ALWAYS=1: the filler fires immediately after every transcript (the
+    # real answer plays after it). 0 = legacy threshold behavior.
     FILLER_ENABLED = _env("FILLER_ENABLED", "1") == "1"
+    FILLER_ALWAYS = _env("FILLER_ALWAYS", "1") == "1"
     FILLER_MODEL = _env("FILLER_MODEL", "z-ai/glm-5.3-flash")
     THINKING_FILLER_SECS = float(_env("THINKING_FILLER_SECS", "3.5"))
     FILLER_AFTER_SECS = float(_env("FILLER_AFTER_SECS", "1.5"))
+    FILLER_MAX_PER_TURN = int(_env("FILLER_MAX_PER_TURN", "3"))
 
     # Dashboard
     DASHBOARD_PORT = int(_env("DASHBOARD_PORT", "8900"))
