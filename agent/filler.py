@@ -36,9 +36,11 @@ TOOL_CANNED = {
 FILLER_SYSTEM = (
     "You generate tiny spoken acknowledgments for a voice assistant while its main "
     "model prepares a full answer. Reply with exactly ONE short sentence, maximum 12 "
-    "words, casual and conversational, acknowledging the user's message. No emojis, "
-    "no lists, no quotes, no question marks at the end. Examples: 'Let me think that "
-    "through.', 'Good question, one moment.', 'Checking on that now.'"
+    "words, casual and conversational, acknowledging what the user is waiting for. "
+    "No emojis, no lists, no quotes, no question marks. Never apologize, never react "
+    "to anything except the user's request itself, and never mention being an AI or "
+    "another model. Examples: 'Let me think that through.', 'Good question, one "
+    "moment.', 'Checking on that now.'"
 )
 
 FILLER_TOOLS = set(TOOL_CANNED) | {"get_weather", "get_time"}
@@ -56,6 +58,7 @@ class FillerSpeaker:
         self.client = client or OpenRouterClient(model=Config.FILLER_MODEL)
         self._pending: dict = {}        # turn_id -> (asyncio.Task, kind)
         self._spoken: set = set()       # turn_ids that already got a filler
+        self._last_transcript: str = "" # latest real user text (set via on_transcript_text)
 
     # ---- hooks called from the pipeline observer ----
     def on_llm_request(self, turn_id: int, user_text: str, already_spoken: bool = False) -> None:
@@ -87,10 +90,11 @@ class FillerSpeaker:
 
     def on_bot_speech_end(self, turn_id: int, work_pending: bool) -> None:
         """The bot finished an utterance but work may still be in flight — re-arm
-        the filler clock so the user never waits long in silence mid-turn."""
+        the filler clock so the user never waits long in silence mid-turn.
+        Uses a canned phrase only: the filler model must never 'react' to fake input."""
         if not self.enabled or not work_pending or turn_id in self._spoken:
             return
-        self._start(turn_id, self._tool(turn_id, "_still_working"), "tool")
+        self._start(turn_id, self._canned_only(turn_id, TOOL_CANNED["_still_working"]), "tool")
 
     def on_tool_done(self, turn_id: int) -> None:
         """Tool finished — cancel its pending filler (instant tools never speak one)."""
@@ -99,11 +103,14 @@ class FillerSpeaker:
     def on_new_turn(self, turn_id: int) -> None:
         self.cancel(turn_id)
 
-    def on_transcript(self, turn_id: int) -> None:
-        """Real (recognized) speech arrived — cancel fillers from any OTHER turn.
+    def on_transcript(self, turn_id: int, text: str = "") -> None:
+        """Real (recognized) speech arrived — cancel fillers from any OTHER turn,
+        and remember the user's words for contextual fillers.
 
         VAD noise triggers new turns without transcripts; those must NOT cancel
         pending fillers, or ambient sound silently kills every filler."""
+        if text:
+            self._last_transcript = text
         for tid in list(self._pending):
             if tid != turn_id:
                 self.cancel(tid)
@@ -137,11 +144,29 @@ class FillerSpeaker:
         try:
             await asyncio.sleep(self.tool_secs)
             fallback = TOOL_CANNED.get(tool_name, "One moment.")
-            await self._speak_filler(turn_id, fallback, fallback)
+            # real user transcript keeps the filler contextual; without it, canned
+            user_text = self._last_transcript or ""
+            if user_text:
+                await self._speak_filler(turn_id, user_text, fallback)
+            else:
+                await self._speak_canned(turn_id, fallback)
         except asyncio.CancelledError:
             pass
         except Exception:
             log.exception("tool filler failed")
+
+    async def _canned_only(self, turn_id: int, phrase: str) -> None:
+        try:
+            await asyncio.sleep(self.tool_secs)
+            await self._speak_canned(turn_id, phrase)
+        except asyncio.CancelledError:
+            pass
+
+    async def _speak_canned(self, turn_id: int, phrase: str) -> None:
+        if turn_id in self._spoken:
+            return
+        self._spoken.add(turn_id)
+        await self.speak(phrase)
 
     async def _speak_filler(self, turn_id: int, user_text: str, fallback) -> None:
         if turn_id in self._spoken:

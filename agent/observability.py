@@ -177,7 +177,7 @@ class DashboardObserver:
             t.t_transcript = now
             t.transcript_text = str(getattr(frame, "text", ""))
             if self.filler:
-                self.filler.on_transcript(t.turn_id)  # real speech cancels stale fillers
+                self.filler.on_transcript(t.turn_id, t.transcript_text)  # real speech cancels stale fillers
             self._emit({"type": "transcript", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed, "text": t.transcript_text})
         elif isinstance(frame, InterruptionFrame):

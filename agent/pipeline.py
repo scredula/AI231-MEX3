@@ -98,7 +98,10 @@ class VoicePipelineAgent:
                 "multi-step builds to the background agent with submit_task. Never read a "
                 "tool's raw output aloud by itself — always work results into a natural "
                 "sentence, and don't give a partial answer before you have everything you "
-                "need. Never publish anything to GitHub unless the user explicitly approves "
+                "need. If a tool result is only intermediate context (like the current "
+                "time), do not speak it — silently continue with your remaining tool "
+                "calls and never comment on or correct what you said earlier. Never "
+                "publish anything to GitHub unless the user explicitly approves "
                 "in this conversation."
             ),
         }
