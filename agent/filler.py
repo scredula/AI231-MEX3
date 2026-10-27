@@ -53,41 +53,58 @@ class FillerSpeaker:
         self.thinking_secs = thinking_secs if thinking_secs is not None else Config.THINKING_FILLER_SECS
         self.tool_secs = tool_secs if tool_secs is not None else Config.FILLER_AFTER_SECS
         self.client = client or OpenRouterClient(model=Config.FILLER_MODEL)
-        self._pending: dict = {}        # turn_id -> asyncio.Task
+        self._pending: dict = {}        # turn_id -> (asyncio.Task, kind)
         self._spoken: set = set()       # turn_ids that already got a filler
 
     # ---- hooks called from the pipeline observer ----
     def on_llm_request(self, turn_id: int, user_text: str, already_spoken: bool = False) -> None:
         if not self.enabled or already_spoken:
             return
-        self._start(turn_id, self._thinking(turn_id, user_text))
+        # Don't re-arm while a tool filler is already pending/queued — the tool
+        # phase is the reason we're slow; a thinking filler would reset the clock.
+        if turn_id in self._pending:
+            return
+        self._start(turn_id, self._thinking(turn_id, user_text), "thinking")
 
     def on_tool_running(self, turn_id: int, tool_name: str) -> None:
-        if not self.enabled or turn_id in self._pending:
-            return  # one filler per turn
+        if not self.enabled or turn_id in self._spoken:
+            return
         if tool_name not in FILLER_TOOLS:
             return
-        self._start(turn_id, self._tool(turn_id, tool_name))
+        # Re-arm: an earlier thinking filler may have been cancelled by first-token
+        # text (the model thinking aloud between tool calls). Tool phases are long.
+        self._start(turn_id, self._tool(turn_id, tool_name), "tool")
 
     def on_first_token(self, turn_id: int) -> None:
-        self.cancel(turn_id)
+        # Only cancel thinking fillers: streamed text means the model is producing
+        # the real answer. Tool fillers must survive — tokens between tool calls
+        # don't reach the user while the tool is still running.
+        self.cancel(turn_id, only="thinking")
 
     def on_bot_speech(self, turn_id: int) -> None:
         self.cancel(turn_id)
 
+    def on_tool_done(self, turn_id: int) -> None:
+        """Tool finished — cancel its pending filler (instant tools never speak one)."""
+        self.cancel(turn_id, only="tool")
+
     def on_new_turn(self, turn_id: int) -> None:
         self.cancel(turn_id)
 
-    def cancel(self, turn_id: int) -> None:
-        task = self._pending.pop(turn_id, None)
-        if task:
-            task.cancel()
+    def cancel(self, turn_id: int, only: Optional[str] = None) -> None:
+        entry = self._pending.pop(turn_id, None)
+        if entry:
+            task, kind = entry
+            if only is None or kind == only:
+                task.cancel()
+            else:
+                self._pending[turn_id] = entry  # keep the other kind pending
 
-    def _start(self, turn_id: int, coro) -> None:
+    def _start(self, turn_id: int, coro, kind: str) -> None:
         self.cancel(turn_id)
         if turn_id in self._spoken:
             return
-        self._pending[turn_id] = asyncio.get_event_loop().create_task(coro)
+        self._pending[turn_id] = (asyncio.get_event_loop().create_task(coro), kind)
 
     # ---- tasks ----
     async def _thinking(self, turn_id: int, user_text: str) -> None:

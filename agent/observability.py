@@ -192,6 +192,8 @@ class DashboardObserver:
             result = getattr(frame, "result", "")
             call_id = str(getattr(frame, "tool_call_id", ""))
             start = self._tool_starts.pop(call_id, None)
+            if self.filler:
+                self.filler.on_tool_done(t.turn_id)  # instant tools don't need fillers
             self._emit({"type": "tool_result", "turn": t.turn_id,
                         "id": call_id,
                         "name": getattr(frame, "function_name", "?"),
