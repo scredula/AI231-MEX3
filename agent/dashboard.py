@@ -47,6 +47,11 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
 .sys-note{font-size:11px;color:#6a7386;margin:4px 0}
 /* activity */
 .evt{background:#1c2130;border:1px solid #2a2f3c;border-radius:8px;margin:6px 0;font-size:12px;overflow:hidden}
+.evt.root{background:#1d2330;border-color:#3a4258}
+.evt.root .nm{color:#e6e6e6;font-weight:600;white-space:normal}
+.evt.root .root-meta{padding:2px 9px 6px;color:#79839a;font-size:11px}
+.evt .kids{margin:0 6px 6px 10px;border-left:2px solid #2a2f3c;padding-left:4px}
+.evt.kid{margin:4px 0}
 .evt .t{display:flex;gap:8px;align-items:center;padding:6px 9px}
 .evt .ic{width:18px;text-align:center}
 .evt .nm{color:#f0c674;font-weight:600}
@@ -111,25 +116,33 @@ function tstamp(ev){if(ev.t_ms!=null)return new Date(ev.t_ms).toLocaleTimeString
 function evtCard(ev,summary,ok){
  const id=ev.id||('t'+(evtSeq++));
  let card=evts.get(id);
- if(!card){card=document.createElement('div');card.className='evt';evts.set(id,card);
+ if(!card){card=document.createElement('div');card.className='evt kid';evts.set(id,card);
   const [ic,label]=meta(ev.name||'');
   const tm=ev.t_ms?new Date(ev.t_ms).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3}):now();
   card.innerHTML='<div class="t"><span class="ic">'+ic+'</span><span class="nm">'+label+'</span>'+
    '<span class="sum"></span><span class="tm">'+tm+'</span><span class="chip run">RUNNING</span></div>'+
    '<details><summary>details</summary><pre></pre></details>';
-  card.dataset.sum=summary||'';feed2.appendChild(card);
+  card.dataset.sum=summary||'';
+  (window._curKids||feed2).appendChild(card);
   card.querySelector('.sum').textContent=((ev.elapsed_ms!=null?'[+'+ev.elapsed_ms+'ms] ':'')+(summary||'')).slice(0,90);}
  const chip=card.querySelector('.chip');
  if(ok===true){const d=ev.duration?msT(ev.duration*1000):'';chip.className='chip ok';chip.textContent='COMPLETED'+(d?' · '+d:'');}
  else if(ok===false){chip.className='chip fail';chip.textContent='FAILED';}
  return card.querySelector('pre');}
-function tlRow(ev,icon,label,extra){
- const d=document.createElement('div');d.className='evt';
- const tm=tstamp(ev);
+function kid(root,icon,label,detail,chipHtml){
+ const d=document.createElement('div');d.className='evt kid';
  d.innerHTML='<div class="t"><span class="ic">'+icon+'</span><span class="nm">'+label+'</span>'+
-  '<span class="sum"></span><span class="tm">'+tm+'</span>'+(extra||'')+'</div>';
- d.querySelector('.sum').textContent=(ev.elapsed_ms!=null?'[+'+ev.elapsed_ms+'ms]':'');
- feed2.appendChild(d);feed2.scrollTop=feed2.scrollHeight;return d;}
+  '<span class="sum"></span><span class="tm">'+now()+'</span>'+(chipHtml||'')+'</div>';
+ d.querySelector('.sum').textContent=detail||'';
+ root.querySelector('.kids').appendChild(d);feed2.scrollTop=feed2.scrollHeight;return d;}
+function turnRoot(ev,text){
+ const card=document.createElement('div');card.className='evt root';
+ const tm=tstamp(ev);
+ card.innerHTML='<div class="t"><span class="ic">🗣️</span><span class="nm root-text"></span>'+
+  '<span class="tm">'+tm+'</span><span class="chip run" id="tot-'+ev.turn+'">IN PROGRESS</span></div>'+
+  '<div class="root-meta"></div><div class="kids"></div>';
+ card.querySelector('.root-text').textContent=text;
+ feed2.appendChild(card);feed2.scrollTop=feed2.scrollHeight;return card;}
 function evtInfo(ev,ok){const pre=evtCard(ev,ev.arguments||ev.query||ev.location||'',ok);
  let s=(ev.arguments||'')+(ev.result?('\\n→ '+ev.result):'');pre.textContent=redact(s);feed2.scrollTop=feed2.scrollHeight;}
 /* tabs (mobile) */
@@ -142,36 +155,46 @@ if(innerWidth>900){document.getElementById('act').style.display='flex';}
 /* agent state */
 function state(s){document.getElementById('agentState').textContent=s?'· '+s:'';}
 /* ---- events ---- */
+window._curKids=null;window._roots=new Map();window._lastLlmReq={};window._speech={};
 es.onmessage=(e)=>{const ev=JSON.parse(e.data);
+ const rootOf=(id,txt)=>window._roots.get(id)||(txt!=null?(()=>{const r=turnRoot({turn:id,t_ms:ev.t_ms},txt);window._roots.set(id,r);window._curKids=r.querySelector('.kids');return r;})():window._curKids);
  switch(ev.type){
-  case 'speech_start':tlRow(ev,'🎤','speech start');break;
-  case 'speech_end':tlRow(ev,'🎤','speech end','<span class="chip unk">'+msT(ev.speech_ms)+'</span>');break;
-  case 'transcript':tlRow(ev,'📝','transcript ready');ts();bubble('me',ev.text,'u:'+ev.turn+':'+ev.text);state('listening done');break;
-  case 'llm_request':tlRow(ev,'🧠','sent to LLM ('+ev.messages.length+' msgs)');break;
-  case 'first_token':tlRow(ev,'⚡','first LLM token');break;
+  case 'speech_start':break;
+  case 'speech_end':window._speech[ev.turn]={speech_ms:ev.speech_ms,t_ms:ev.t_ms};break;
+  case 'transcript':{ts();bubble('me',ev.text,'u:'+ev.turn+':'+ev.text);state('listening done');
+   const r=turnRoot(ev,ev.text);window._roots.set(ev.turn,r);window._curKids=r.querySelector('.kids');
+   const sp=window._speech[ev.turn];
+   if(sp&&sp.speech_ms!=null){const stt=ev.t_ms-sp.t_ms;
+    r.querySelector('.root-meta').textContent='speech '+msT(sp.speech_ms)+' · STT '+msT(stt);}
+   break;}
+  case 'llm_request':window._lastLlmReq[ev.turn]=ev.t_ms;break;
+  case 'first_token':{const t0=window._lastLlmReq[ev.turn];
+   if(t0&&ev.t_ms-t0>0)kid(rootOf(ev.turn),'🧠','LLM think',msT(ev.t_ms-t0));break;}
   case 'llm_delta':setTyping(false);state('replying');
    if(!window._live){const live=document.createElement('div');live.className='row bot';
     live.innerHTML='<div class=\"bubble\" id=\"liveb\"></div>';feed.appendChild(live);window._live=live.querySelector('#liveb');}
    window._live.textContent+=ev.delta;feed.scrollTop=feed.scrollHeight;break;
   case 'bot_speech_start':
    if(window._live){window._live.removeAttribute('id');window._live=null;}
-   if(ev.kind==='filler'){tlRow(ev,'🔊','TTS filler spoken');}
-   else {tlRow(ev,'🔊','TTS response spoken');
-    if(ev.latencies){const l=ev.latencies;state('');
-     let d=document.createElement('div');d.className='sys-note';
-     d.textContent='latency — speech→transcript '+(l.speech_to_transcript==null?'—':(l.speech_to_transcript*1000|0)+'ms')
-      +', LLM→first token '+(l.llm_request_to_first_token==null?'—':(l.llm_request_to_first_token*1000|0)+'ms')
-      +', LLM→spoken '+(l.llm_request_to_bot_speech==null?'—':(l.llm_request_to_bot_speech*1000|0)+'ms')
-      +(l.speech_end_to_bot_speech==null?'':(', TOTAL speech-end→spoken '+(l.speech_end_to_bot_speech*1000|0)+'ms'));
-     feed.appendChild(d);}}
+   if(ev.kind==='filler'){kid(rootOf(ev.turn),'🔊','TTS filler',ev.latencies?msT((ev.latencies.llm_request_to_bot_speech||0)*1000):'');}
+   else{const r=rootOf(ev.turn);kid(r,'🔊','TTS response',
+     ev.latencies&&ev.latencies.llm_request_to_bot_speech!=null?msT(ev.latencies.llm_request_to_bot_speech*1000)+' after last LLM call':'');
+    const tot=document.getElementById('tot-'+ev.turn);
+    if(tot&&ev.latencies&&ev.latencies.speech_end_to_bot_speech!=null){
+     tot.className='chip ok';tot.textContent='TOTAL '+msT(ev.latencies.speech_end_to_bot_speech*1000);}
+    state('');}
    break;
-  case 'turn_end':break;
+  case 'turn_end':{const r=window._roots.get(ev.turn);
+   if(r){const tot=document.getElementById('tot-'+ev.turn);
+    if(tot&&tot.classList.contains('run')){tot.className='chip unk';tot.textContent='NO RESPONSE';}
+    window._curKids=null;}break;}
   case 'tool_running':setTyping(true);state('running '+ev.name);evtInfo(ev,null);break;
   case 'tool_result':evtInfo(ev,ev.ok);break;
   case 'tool_calls_started':break;
-  case 'announcement':ts();bubble('ann',ev.text,'a:'+ev.turn+':'+ev.text.slice(0,40));break;
+  case 'announcement':{const r=rootOf(ev.turn,ev.text);kid(r,'🔊','filler spoken',ev.text.slice(0,60));
+   ts();bubble('ann',ev.text,'a:'+ev.turn+':'+ev.text.slice(0,40));break;}
   case 'interruption':ts();bubble('bot err','[interrupted by user]','i:'+ev.turn);break;
-  case 'error':evtCard({name:'error',id:'err'+ev.turn},ev.error,false).textContent=redact(ev.error);break;
+  case 'error':{const pre=evtCard({name:'error',id:'err'+ev.turn},ev.error,false);pre.textContent=redact(ev.error);break;}
  }};
 /* composer (text mode convenience; voice mode answers spoken input) */
 const inp=document.getElementById('inp');
