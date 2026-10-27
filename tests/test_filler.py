@@ -54,15 +54,15 @@ async def test_always_no_llm_request_filler():
 
 
 @pytest.mark.asyncio
-async def test_always_tool_filler_canned_after_immediate():
+async def test_always_no_tool_filler_after_immediate():
     s = make(True, [{"role": "assistant", "content": "immediate"}], tool_secs=0.02)
 
     async def arm():
         s.on_transcript(1, "search for news")
         await asyncio.sleep(0.1)   # immediate filler speaks
-        s.on_tool_running(1, "search_web")
+        s.on_tool_running(1, "search_web")   # always-mode: must be skipped
     spoken = await collect(s, 0.3, arm)
-    assert len(spoken) == 2 and "search" in spoken[1].lower()
+    assert len(spoken) == 1  # only the immediate filler; no mid-turn chatter
 
 
 @pytest.mark.asyncio
@@ -151,4 +151,5 @@ async def test_disabled_never_speaks():
 
 def test_filler_system_prompt_caps_words():
     from agent.filler import FILLER_SYSTEM
-    assert "8 words" in FILLER_SYSTEM
+    assert "6 words" in FILLER_SYSTEM
+    assert "NEVER answer the user's question" in FILLER_SYSTEM

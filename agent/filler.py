@@ -42,11 +42,12 @@ FILLER_TOOLS = set(TOOL_CANNED) | {"get_weather", "get_time"}
 FILLER_SYSTEM = (
     "You generate tiny spoken acknowledgments for a voice assistant while its main "
     "model prepares a full answer. Reply with exactly ONE very short sentence, "
-    "maximum 8 words, casual and conversational, acknowledging what the user is "
-    "waiting for. No emojis, no lists, no quotes, no question marks. Never apologize, "
-    "never react to anything except the user's request itself, and never mention "
-    "being an AI or another model. Examples: 'Let me look that up.', 'Good question, "
-    "one moment.', 'Checking on that now.'"
+    "maximum 6 words, casual and conversational, acknowledging that you are working "
+    "on what the user asked. NEVER answer the user's question yourself — you do not "
+    "have any information; only promise to look into it. No emojis, no lists, no "
+    "quotes, no question marks. Never apologize, never react to anything except the "
+    "user's request itself. Examples: 'Let me look that up.', 'Good question, one "
+    "moment.', 'Checking on that now.'"
 )
 
 
@@ -99,8 +100,11 @@ class FillerSpeaker:
             return
         if turn_id in self._pending:
             return  # something is already armed for this turn
+        if self.always and self._counts.get(turn_id, 0) > 0:
+            return  # always-mode: the immediate filler already acknowledged — no
+            # mid-turn tool fillers (they delay short tools and add chatter)
         if turn_id in self._counts and self._counts[turn_id] > 0:
-            # immediate filler already covered the start — canned only
+            # threshold mode: canned only (filler model must not react twice)
             self._start(turn_id, self._canned_only(turn_id, TOOL_CANNED.get(tool_name, "One moment.")), "tool")
         else:
             self._start(turn_id, self._tool(turn_id, tool_name), "tool")
@@ -173,8 +177,8 @@ class FillerSpeaker:
                     temperature=0.9),
                 timeout=4.0)
             text = (msg.get("content") or "").strip().strip('"')
-            if not text or len(text) > 100 or "\n" in text:
-                text = None  # model misbehaved — use canned
+            if not text or len(text) > 60 or "\n" in text:
+                text = None  # too long (likely tried to answer) or malformed — canned
         except (LLMError, asyncio.TimeoutError, Exception) as e:
             log.debug("filler model unavailable (%s) — using canned", e)
         if not self._speak_allowed(turn_id):

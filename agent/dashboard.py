@@ -247,7 +247,7 @@ class DashboardServer:
             import uvicorn
 
             async def index(request):
-                return HTMLResponse(HTML)
+                return HTMLResponse(HTML, headers={"Cache-Control": "no-store"})
 
             async def events(request):
                 q = self.bus.subscribe()
