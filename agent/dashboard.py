@@ -190,10 +190,7 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
    window._live.textContent+=ev.delta;feed.scrollTop=feed.scrollHeight;break;
   case 'bot_speech_start':
    if(window._live){window._live.removeAttribute('id');window._live=null;}
-   if(ev.kind==='filler'){kid(rootOf(ev.turn),'🔊','TTS filler',
-     ev.latencies?msT((ev.latencies.llm_request_to_bot_speech||0)*1000):'',
-     null,'text spoken while work continues');}
-   else{const r=rootOf(ev.turn);
+   {const r=rootOf(ev.turn);
     const lts=ev.latencies&&ev.latencies.llm_request_to_bot_speech!=null?msT(ev.latencies.llm_request_to_bot_speech*1000):null;
     kid(r,'🔊','TTS response',lts?lts+' after last LLM call':'',
      null,'model: '+(ev.model||'?')+(lts?'\\nLLM→TTS: '+lts:''));
@@ -210,7 +207,7 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
   case 'tool_result':evtInfo(ev,ev.ok);break;
   case 'tool_calls_started':break;
   case 'announcement':{const r=rootOf(ev.turn,ev.text);
-   kid(r,'🔊','filler spoken',ev.text.slice(0,60),null,'canned phrase\\ntext: '+ev.text);
+   kid(r,'🔊','announcement',ev.text.slice(0,60),null,'spoken announcement\\ntext: '+ev.text);
    ts();bubble('ann',ev.text,'a:'+ev.turn+':'+ev.text.slice(0,40));break;}
   case 'interruption':ts();bubble('bot err','[interrupted by user]','i:'+ev.turn);break;
   case 'error':{const pre=evtCard({name:'error',id:'err'+ev.turn},ev.error,false);pre.textContent=redact(ev.error);break;}

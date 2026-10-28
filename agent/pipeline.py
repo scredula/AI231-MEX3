@@ -157,10 +157,14 @@ class VoicePipelineAgent:
             """
             await params.result_callback(await agent.build_website(request))
 
-        async def get_time(params: FunctionCallParams) -> None:
-            """Get the current local date and time, and the day of the week."""
-            import datetime
-            await params.result_callback(datetime.datetime.now().strftime("%A, %d %B %Y, %H:%M:%S"))
+        async def get_time(params: FunctionCallParams, timezone: str = "") -> None:
+            """Get the current date, time and weekday, optionally in an IANA timezone.
+
+            Args:
+                timezone: IANA timezone name, e.g. America/New_York. Omit for local time.
+            """
+            from services.timeutil import now_str
+            await params.result_callback(now_str(timezone))
 
         async def search_web(params: FunctionCallParams, query: str) -> None:
             """Search the web for current information (news, prices, facts).
@@ -253,16 +257,8 @@ class VoicePipelineAgent:
         ])
         worker = PipelineWorker(pipeline, observers=[observer.pipecat_observer()])
 
-        # voice fillers while the slow model thinks / tools run.
-        # append_to_context=False: filler text must NEVER enter the LLM context —
-        # the model otherwise sees its own fillers as "partial answers it already
-        # spoke" and narrates reasoning about them (the thought-leak bug).
-        from agent.filler import FillerSpeaker
-        filler = FillerSpeaker(
-            speak=lambda text: asyncio.get_event_loop().create_task(
-                worker.queue_frame(TTSSpeakFrame(text, append_to_context=False))))
-        observer.filler = filler
-
+        # Task announcements (append_to_context=False: spoken text must never enter
+        # the LLM context).
         def announce(text: str) -> None:
             """Speak a task announcement without blocking the pipeline."""
             loop = asyncio.get_event_loop()
@@ -351,10 +347,6 @@ class VoicePipelineAgent:
                                  "messages": _llm_messages(context)})
                 obs.tracker.t_llm_request = _time.monotonic()
                 obs.tracker.t_llm_first_token = None  # per-call stage timing
-                if getattr(obs, "filler", None):
-                    obs.filler.on_llm_request(
-                        obs.tracker.turn_id, obs.tracker.transcript_text,
-                        already_spoken=obs.tracker.t_bot_speech is not None)
             return await llm.__class__.get_chat_completions(llm, context)
 
         return wrapped

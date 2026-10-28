@@ -49,16 +49,6 @@ class Config:
     # cutting you off (lower = snappier, higher = more patient).
     TURN_STOP_SECS = float(_env("TURN_STOP_SECS", "0.8"))
 
-    # Voice fillers: canned "one moment…" lines spoken while the slow model
-    # thinks or tools run. FILLER_ALWAYS=1: after a transcript, wait
-    # FILLER_DELAY_SECS — if the LLM hasn't started responding by then, speak
-    # a canned filler. 0 = legacy threshold behavior (THINKING_FILLER_SECS).
-    FILLER_ENABLED = _env("FILLER_ENABLED", "1") == "1"
-    FILLER_ALWAYS = _env("FILLER_ALWAYS", "1") == "1"
-    FILLER_DELAY_SECS = float(_env("FILLER_DELAY_SECS", "3"))
-    THINKING_FILLER_SECS = float(_env("THINKING_FILLER_SECS", "3.5"))
-    FILLER_AFTER_SECS = float(_env("FILLER_AFTER_SECS", "1.5"))
-    FILLER_MAX_PER_TURN = int(_env("FILLER_MAX_PER_TURN", "3"))
 
     # Reasoning models (e.g. nemotron) stream their thinking into the response
     # content. OpenRouter's reasoning.exclude moves it into a separate field so

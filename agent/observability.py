@@ -142,8 +142,6 @@ class DashboardObserver:
         self.bus = bus
         self.tracker = TurnTracker(self._emit)
         self._tool_starts = {}  # tool_call_id -> monotonic start
-        self.filler = None      # optional FillerSpeaker, set by the pipeline
-        self._pending_filler_announcement = False
         self._bridge = _PipecatBridge(self)
 
     def pipecat_observer(self):
@@ -176,8 +174,6 @@ class DashboardObserver:
         elif isinstance(frame, TranscriptionFrame):
             t.t_transcript = now
             t.transcript_text = str(getattr(frame, "text", ""))
-            if self.filler:
-                self.filler.on_transcript(t.turn_id, t.transcript_text)  # real speech cancels stale fillers
             self._emit({"type": "transcript", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed, "text": t.transcript_text})
         elif isinstance(frame, InterruptionFrame):
@@ -194,8 +190,6 @@ class DashboardObserver:
         elif isinstance(frame, FunctionCallInProgressFrame):
             call_id = str(getattr(frame, "tool_call_id", ""))
             self._tool_starts[call_id] = (now, tms)
-            if self.filler:
-                self.filler.on_tool_running(t.turn_id, getattr(frame, "function_name", "?"))
             self._emit({"type": "tool_running", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed,
                         "id": call_id,
@@ -206,8 +200,6 @@ class DashboardObserver:
             result = getattr(frame, "result", "")
             call_id = str(getattr(frame, "tool_call_id", ""))
             start = self._tool_starts.pop(call_id, None)
-            if self.filler:
-                self.filler.on_tool_done(t.turn_id)  # instant tools don't need fillers
             self._emit({"type": "tool_result", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed,
                         "id": call_id,
@@ -217,8 +209,6 @@ class DashboardObserver:
                         "duration": round(now - start[0], 3) if start else None,
                         "result": str(result)[:2000]})
         elif isinstance(frame, LLMTextFrame):
-            if self.filler:
-                self.filler.on_first_token(t.turn_id)
             text = str(getattr(frame, "text", ""))
             if not t.t_llm_first_token:
                 t.t_llm_first_token = now
@@ -227,25 +217,15 @@ class DashboardObserver:
             t.llm_text += text
             self._emit({"type": "llm_delta", "turn": t.turn_id, "delta": text})
         elif isinstance(frame, BotStartedSpeakingFrame):
-            if self.filler:
-                self.filler.on_bot_speech(t.turn_id)
             t.t_bot_speech = now
-            kind = "filler" if self._pending_filler_announcement else "response"
-            self._pending_filler_announcement = False
             self._emit({"type": "bot_speech_start", "turn": t.turn_id, "t_ms": tms,
-                        "elapsed_ms": elapsed, "kind": kind, "model": Config.FAST_MODEL,
+                        "elapsed_ms": elapsed, "model": Config.FAST_MODEL,
                         "latencies": t.latencies()})
         elif isinstance(frame, BotStoppedSpeakingFrame):
             t.end_turn()
-            # Work may still be in flight (tools/next LLM call) — re-arm the filler
-            # clock so the user never waits long in silence mid-turn.
-            if self.filler:
-                self.filler.on_bot_speech_end(t.turn_id, work_pending=bool(self._tool_starts))
         elif isinstance(frame, TTSSpeakFrame):
-            self._pending_filler_announcement = True
             self._emit({"type": "announcement", "turn": t.turn_id, "t_ms": tms,
-                        "elapsed_ms": elapsed, "text": str(frame.text)[:300],
-                        "model": Config.FILLER_MODEL})
+                        "elapsed_ms": elapsed, "text": str(frame.text)[:300]})
         elif isinstance(frame, ErrorFrame):
             self._emit({"type": "error", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed, "error": str(frame.error)[:300]})

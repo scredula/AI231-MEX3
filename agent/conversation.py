@@ -38,8 +38,8 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]}}},
     {"type": "function", "function": {"name": "task_cancel", "description": "Cancel a running background task.",
      "parameters": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]}}},
-    {"type": "function", "function": {"name": "get_time", "description": "Get the current local date, time and weekday.",
-     "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "get_time", "description": "Get the current date, time and weekday. Pass an IANA timezone (e.g. America/New_York) to get that zone's time.",
+     "parameters": {"type": "object", "properties": {"timezone": {"type": "string", "description": "IANA timezone name, e.g. America/New_York. Omit for local time."}}, "required": []}}},
     {"type": "function", "function": {"name": "search_web", "description": "Search the web for current information (news, weather, prices, facts). Returns titles, snippets and URLs.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "The search query"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "get_weather", "description": "Current weather and today's forecast for a location (Open-Meteo, live data).",
@@ -113,9 +113,9 @@ class ConversationAgent:
         self.announcer("Building the website now — I'll tell you when it's ready to preview.")
         return json.dumps({"task_id": task_id})
 
-    async def _get_time(self) -> str:
-        import datetime
-        return datetime.datetime.now().strftime("%A, %d %B %Y, %H:%M:%S")
+    async def _get_time(self, timezone: str = "") -> str:
+        from services.timeutil import now_str
+        return now_str(timezone)
 
     async def _search_web(self, query: str) -> str:
         loop = asyncio.get_event_loop()

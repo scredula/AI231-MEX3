@@ -1,7 +1,6 @@
 """Regression guard: every TTSSpeakFrame in the voice pipeline MUST set
-append_to_context=False. Default True leaks filler/announcement text into the
-LLM context, and the model then narrates reasoning about its own fillers aloud
-(the thought-leak bug)."""
+append_to_context=False. Default True leaks spoken announcement text into the
+LLM context, which the model then reacts to / narrates about (thought-leak bug)."""
 
 from pathlib import Path
 

@@ -1,4 +1,4 @@
-"""Live E2E: exercise the tool + filler firing path via /say."""
+"""Live E2E: exercise the tool + announcement path via /say."""
 import asyncio
 import json
 import sys
@@ -22,7 +22,7 @@ async def main() -> None:
     print(len(evs), "events:", dict(Counter(e["type"] for e in evs)))
     for e in evs:
         if e["type"] == "announcement":
-            print("FILLER:", repr(e["text"]))
+            print("ANNOUNCEMENT:", repr(e["text"]))
         if e["type"] == "tool_result":
             print("TOOL:", e.get("name"), "ok:", e.get("ok"), "duration:", e.get("duration"))
         if e["type"] == "bot_speech_start":
