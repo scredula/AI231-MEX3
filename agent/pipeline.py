@@ -79,7 +79,11 @@ class VoicePipelineAgent:
             input_device_index=int(Config.AUDIO_INPUT_DEVICE) if Config.AUDIO_INPUT_DEVICE else None,
             output_device_index=int(Config.AUDIO_OUTPUT_DEVICE) if Config.AUDIO_OUTPUT_DEVICE else None,
         ))
-        vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=Config.TURN_STOP_SECS)))
+        vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(
+            confidence=Config.VAD_CONFIDENCE,
+            start_secs=Config.VAD_START_SECS,
+            stop_secs=Config.TURN_STOP_SECS,
+            min_volume=Config.VAD_MIN_VOLUME)))
         stt = DeepgramSTTService(api_key=Config.ASR_API_KEY, model=Config.ASR_MODEL)
         llm = OpenAILLMService(api_key=Config.OPENROUTER_API_KEY,
                                base_url=Config.OPENROUTER_BASE_URL,

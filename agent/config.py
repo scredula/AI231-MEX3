@@ -49,6 +49,16 @@ class Config:
     # cutting you off (lower = snappier, higher = more patient).
     TURN_STOP_SECS = float(_env("TURN_STOP_SECS", "0.8"))
 
+    # Voice-activity detection (Silero, before Deepgram sees the audio).
+    # Tune these if background noise is picked up as speech:
+    #   confidence — min voice probability 0..1 (higher = stricter)
+    #   start_secs — how long voice must persist before speech starts (higher
+    #                = brief noises ignored)
+    #   min_volume — minimum audio volume 0..1 (higher = faint noise ignored)
+    VAD_CONFIDENCE = float(_env("VAD_CONFIDENCE", "0.75"))
+    VAD_START_SECS = float(_env("VAD_START_SECS", "0.3"))
+    VAD_MIN_VOLUME = float(_env("VAD_MIN_VOLUME", "0.6"))
+
 
     # Reasoning models (e.g. nemotron) stream their thinking into the response
     # content. OpenRouter's reasoning.exclude moves it into a separate field so
