@@ -112,7 +112,10 @@ class VoicePipelineAgent:
                 "sentence, and don't give a partial answer before you have everything you "
                 "need. If a tool result is only intermediate context (like the current "
                 "time), do not speak it — silently continue with your remaining tool "
-                "calls and never comment on or correct what you said earlier. Never "
+                "calls and never comment on or correct what you said earlier. Think silently: "
+                "never narrate, recap, or second-guess your reasoning out loud — your entire "
+                "reply is spoken word-for-word, so output ONLY the final answer sentence(s), "
+                "never 'Wait', 'Hmm', or deliberation about what to say. Never "
                 "publish anything to GitHub unless the user explicitly approves "
                 "in this conversation."
             ),
@@ -250,18 +253,22 @@ class VoicePipelineAgent:
         ])
         worker = PipelineWorker(pipeline, observers=[observer.pipecat_observer()])
 
-        # voice fillers while the slow model thinks / tools run
+        # voice fillers while the slow model thinks / tools run.
+        # append_to_context=False: filler text must NEVER enter the LLM context —
+        # the model otherwise sees its own fillers as "partial answers it already
+        # spoke" and narrates reasoning about them (the thought-leak bug).
         from agent.filler import FillerSpeaker
         filler = FillerSpeaker(
             speak=lambda text: asyncio.get_event_loop().create_task(
-                worker.queue_frame(TTSSpeakFrame(text))))
+                worker.queue_frame(TTSSpeakFrame(text, append_to_context=False))))
         observer.filler = filler
 
         def announce(text: str) -> None:
             """Speak a task announcement without blocking the pipeline."""
             loop = asyncio.get_event_loop()
             loop.call_soon_threadsafe(
-                lambda: asyncio.create_task(worker.queue_frame(TTSSpeakFrame(text))))
+                lambda: asyncio.create_task(
+                    worker.queue_frame(TTSSpeakFrame(text, append_to_context=False))))
 
         self.coordinator.on_announce(announce)
 
