@@ -40,6 +40,18 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]}}},
     {"type": "function", "function": {"name": "get_time", "description": "Get the current date, time and weekday. Pass an IANA timezone (e.g. America/New_York) to get that zone's time.",
      "parameters": {"type": "object", "properties": {"timezone": {"type": "string", "description": "IANA timezone name, e.g. America/New_York. Omit for local time."}}, "required": []}}},
+    {"type": "function", "function": {"name": "set_reminder", "description": "Set a reminder that will be announced when it fires.",
+     "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "What the reminder should say."}, "in_minutes": {"type": "number", "description": "Minutes from now (default 5)."}}, "required": ["text"]}}},
+    {"type": "function", "function": {"name": "list_reminders", "description": "List active reminders.",
+     "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "add_note", "description": "Save a persistent note.",
+     "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "The note text."}}, "required": ["text"]}}},
+    {"type": "function", "function": {"name": "read_notes", "description": "Read recent notes.",
+     "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "system_stats", "description": "Get this machine's CPU, memory, disk and temperature stats.",
+     "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "send_telegram", "description": "Send a message to the user's Telegram chat.",
+     "parameters": {"type": "object", "properties": {"text": {"type": "string", "description": "The message to send."}}, "required": ["text"]}}},
     {"type": "function", "function": {"name": "search_web", "description": "Search the web for current information (news, weather, prices, facts). Returns titles, snippets and URLs.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "The search query"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "get_weather", "description": "Current weather and today's forecast for a location (Open-Meteo, live data).",
@@ -74,6 +86,7 @@ class ConversationAgent:
         self.workspace_tools = WorkspaceTools()
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         self.announcer = announcer or (lambda text: print(f"[agent] {text}"))
+        self._reminders = None
 
     def _tools(self) -> dict:
         return {"submit_task": self._submit_task,
@@ -81,6 +94,12 @@ class ConversationAgent:
                 "task_cancel": self._task_cancel,
                 "build_website": self._build_website,
                 "get_time": self._get_time,
+                "set_reminder": self._set_reminder,
+                "list_reminders": self._list_reminders,
+                "add_note": self._add_note,
+                "read_notes": self._read_notes,
+                "system_stats": self._system_stats,
+                "send_telegram": self._send_telegram,
                 "search_web": self._search_web,
                 "get_weather": self._get_weather,
                 "create_file": self._create_file,
@@ -116,6 +135,54 @@ class ConversationAgent:
     async def _get_time(self, timezone: str = "") -> str:
         from services.timeutil import now_str
         return now_str(timezone)
+
+    async def _set_reminder(self, text: str, in_minutes: float = 5.0) -> str:
+        from services.reminders import ReminderStore
+        store = self._reminder_store()
+        rem = store.add(text, in_minutes)
+        return f"Reminder set for {in_minutes} minutes from now."
+
+    async def _list_reminders(self) -> str:
+        import time as _t
+        from services.reminders import ReminderStore
+        active = self._reminder_store().list_active()
+        if not active:
+            return "No active reminders."
+        return "; ".join(f"{r['text']} in {max(0, (r['due'] - _t.time()) / 60):.0f} minutes"
+                         for r in active)
+
+    def _reminder_store(self):
+        from agent.config import Config
+        from services.reminders import ReminderStore
+        if self._reminders is None:
+            self._reminders = ReminderStore(
+                Config.TASKS_DB_PATH.parent / "reminders.json",
+                on_fire=lambda r: self.announcer(f"Reminder: {r['text']}"))
+            self._reminders.start()
+        return self._reminders
+
+    async def _add_note(self, text: str) -> str:
+        from agent.config import Config
+        from services.notes import NotesStore
+        NotesStore(Config.TASKS_DB_PATH.parent / "notes.json").add(text)
+        return "Note saved."
+
+    async def _read_notes(self) -> str:
+        from agent.config import Config
+        from services.notes import NotesStore
+        return NotesStore(Config.TASKS_DB_PATH.parent / "notes.json").read(5)
+
+    async def _system_stats(self) -> str:
+        loop = asyncio.get_event_loop()
+        from services.sysstats import system_stats
+        return await loop.run_in_executor(None, system_stats)
+
+    async def _send_telegram(self, text: str) -> str:
+        from services.telegram_client import send_message, TelegramError
+        try:
+            return await send_message(text)
+        except TelegramError as e:
+            return f"couldn't send: {e}"
 
     async def _search_web(self, query: str) -> str:
         loop = asyncio.get_event_loop()

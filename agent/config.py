@@ -57,6 +57,10 @@ class Config:
     REASONING_EXCLUDE = _env("REASONING_EXCLUDE", "1") == "1"
     REASONING_EFFORT = _env("REASONING_EFFORT", "").strip().lower()
 
+    # Telegram (voice agent can message the user)
+    TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID", "")
+
     # Dashboard
     DASHBOARD_PORT = int(_env("DASHBOARD_PORT", "8900"))
 

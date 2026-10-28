@@ -34,6 +34,14 @@ async def main() -> None:
         ("list_dir", {"path": "."}),
         ("run_command", {"command": "python --version"}),
         ("run_command", {"command": "sudo rm -rf /"}),  # must be rejected
+        ("get_time", {"timezone": "America/New_York"}),
+        ("get_weather", {"location": "New York"}),
+        ("system_stats", {}),
+        ("add_note", {"text": "mcp probe note"}),
+        ("read_notes", {}),
+        ("add_reminder", {"text": "mcp probe reminder", "in_minutes": 2}),
+        ("list_reminders", {}),
+        ("send_telegram", {"text": "voice agent mcp probe"}),  # clean error until token set
     ])
     await probe("mcp_servers.task_server", [
         ("task_list", {}),

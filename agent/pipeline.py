@@ -166,6 +166,74 @@ class VoicePipelineAgent:
             from services.timeutil import now_str
             await params.result_callback(now_str(timezone))
 
+        async def set_reminder(params: FunctionCallParams, text: str, in_minutes: float = 5.0) -> None:
+            """Set a reminder that will be spoken aloud when it fires.
+
+            Args:
+                text: What the reminder should say.
+                in_minutes: Minutes from now (1 to 10080).
+            """
+            from services.reminders import ReminderStore
+            store = ReminderStore(Config.TASKS_DB_PATH.parent / "reminders.json")
+            try:
+                rem = store.add(text, in_minutes)
+            except ValueError as e:
+                await params.result_callback(f"error: {e}")
+                return
+            await params.result_callback(f"Reminder set for {in_minutes} minutes from now.")
+
+        async def list_reminders(params: FunctionCallParams) -> None:
+            """List active reminders."""
+            from services.reminders import ReminderStore
+            store = ReminderStore(Config.TASKS_DB_PATH.parent / "reminders.json")
+            import time as _t
+            active = store.list_active()
+            if not active:
+                await params.result_callback("No active reminders.")
+                return
+            await params.result_callback("; ".join(
+                f"{r['text']} in {max(0, (r['due'] - _t.time()) / 60):.0f} minutes" for r in active))
+
+        async def add_note(params: FunctionCallParams, text: str) -> None:
+            """Save a persistent note.
+
+            Args:
+                text: The note text.
+            """
+            from services.notes import NotesStore
+            store = NotesStore(Config.TASKS_DB_PATH.parent / "notes.json")
+            try:
+                note = store.add(text)
+            except ValueError as e:
+                await params.result_callback(f"error: {e}")
+                return
+            await params.result_callback(f"Note saved.")
+
+        async def read_notes(params: FunctionCallParams) -> None:
+            """Read recent notes."""
+            from services.notes import NotesStore
+            await params.result_callback(
+                NotesStore(Config.TASKS_DB_PATH.parent / "notes.json").read(5))
+
+        async def system_stats(params: FunctionCallParams) -> None:
+            """Get this machine's CPU, memory, disk and temperature stats."""
+            from services.sysstats import system_stats as _stats
+            await params.result_callback(await asyncio.get_event_loop().run_in_executor(None, _stats))
+
+        async def send_telegram(params: FunctionCallParams, text: str) -> None:
+            """Send a message to the user's Telegram.
+
+            Args:
+                text: The message to send.
+            """
+            from services.telegram_client import send_message, TelegramError
+            try:
+                result = await send_message(text)
+            except TelegramError as e:
+                await params.result_callback(f"couldn't send: {e}")
+                return
+            await params.result_callback(result)
+
         async def search_web(params: FunctionCallParams, query: str) -> None:
             """Search the web for current information (news, prices, facts).
 
@@ -242,6 +310,8 @@ class VoicePipelineAgent:
 
         context = LLMContext([system], tools=[submit_task, task_status, task_cancel, build_website,
                                               get_time, search_web, get_weather, create_file,
+                                              set_reminder, list_reminders, add_note, read_notes,
+                                              system_stats, send_telegram,
                                               edit_file, read_file, run_command])
         aggregators = LLMContextAggregatorPair(context)
 
@@ -268,6 +338,12 @@ class VoicePipelineAgent:
 
         self.coordinator.on_announce(announce)
 
+        # reminders: spoken through TTS when they fire
+        from services.reminders import ReminderStore
+        self._reminders = ReminderStore(
+            Config.TASKS_DB_PATH.parent / "reminders.json",
+            on_fire=lambda r: announce(f"Reminder: {r['text']}"))
+
         from agent.dashboard import DashboardServer
         from pipecat.frames.frames import TranscriptionFrame
 
@@ -285,6 +361,7 @@ class VoicePipelineAgent:
 
         runner = WorkerRunner()
         await runner.add_workers(worker)
+        self._reminders.start()          # spoken reminders fire from here
         await runner.run()
 
     def _make_tool_host(self):
