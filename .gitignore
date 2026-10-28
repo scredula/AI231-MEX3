@@ -10,3 +10,7 @@ workspace/
 data/tasks.json
 node_modules/
 .DS_Store
+
+# agent-local state (reminders/notes are runtime data)
+data/notes.json
+data/reminders.json
