@@ -75,7 +75,7 @@ class VoicePipelineAgent:
                                base_url=Config.OPENROUTER_BASE_URL,
                                settings=OpenAILLMService.Settings(
                                    model=Config.FAST_MODEL,
-                                   extra={"reasoning": {"exclude": True}} if Config.REASONING_EXCLUDE else {}))
+                                   extra={"extra_body": {"reasoning": {"exclude": True}}} if Config.REASONING_EXCLUDE else {}))
         tts = self._make_tts_service(transport_sample_rate=24000)
 
         # observability: dashboard + frame observer + LLM request capture
