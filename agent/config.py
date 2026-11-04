@@ -59,6 +59,12 @@ class Config:
     VAD_START_SECS = float(_env("VAD_START_SECS", "0.3"))
     VAD_MIN_VOLUME = float(_env("VAD_MIN_VOLUME", "0.6"))
 
+    # Echo gate: while the bot is speaking, drop mic audio so the speaker output
+    # isn't transcribed back as user speech (half-duplex; disables barge-in).
+    # Set to 0 when using headphones.
+    MIC_GATE_DURING_TTS = _env("MIC_GATE_DURING_TTS", "1") == "1"
+    MIC_GATE_TAIL_SECS = float(_env("MIC_GATE_TAIL_SECS", "0.6"))
+
 
     # Reasoning models (e.g. nemotron) stream their thinking into the response
     # content. OpenRouter's reasoning.exclude moves it into a separate field so

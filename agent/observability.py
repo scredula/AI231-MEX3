@@ -217,11 +217,15 @@ class DashboardObserver:
             t.llm_text += text
             self._emit({"type": "llm_delta", "turn": t.turn_id, "delta": text})
         elif isinstance(frame, BotStartedSpeakingFrame):
+            if getattr(self, "echo_gate", None):
+                self.echo_gate.on_bot_speech_start()
             t.t_bot_speech = now
             self._emit({"type": "bot_speech_start", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed, "model": Config.FAST_MODEL,
                         "latencies": t.latencies()})
         elif isinstance(frame, BotStoppedSpeakingFrame):
+            if getattr(self, "echo_gate", None):
+                self.echo_gate.on_bot_speech_end()
             t.end_turn()
         elif isinstance(frame, TTSSpeakFrame):
             self._emit({"type": "announcement", "turn": t.turn_id, "t_ms": tms,

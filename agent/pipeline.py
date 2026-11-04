@@ -14,6 +14,8 @@ import logging
 
 from agent.config import Config
 from agent.observability import DashboardObserver, EventBus
+from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, UserAudioRawFrame
+from pipecat.processors.frame_processor import FrameProcessor
 
 
 def _reasoning_body() -> dict:
@@ -27,6 +29,46 @@ def _reasoning_body() -> dict:
 
 log = logging.getLogger("pipeline")
 
+
+class EchoGateProcessor(FrameProcessor):
+    """Drops mic audio while the bot is speaking (+ a short tail) so the
+    microphone can't pick up the speaker's TTS output and transcribe it back
+    as user speech (the agent "hearing itself"). Trade-off: with the gate on,
+    barge-in is impossible — speak after the bot finishes. Set
+    MIC_GATE_DURING_TTS=0 (e.g. when using headphones) to restore barge-in.
+
+    The bot-speech frames originate at the TTS service DOWNSTREAM of this
+    processor, so state is fed in by the pipeline observer via
+    on_bot_speech_start()/on_bot_speech_end().
+    """
+
+    def __init__(self, tail_secs: float = 0.6):
+        super().__init__()
+        self._tail = tail_secs
+        self._muted = False
+        self._unmute_task = None
+
+    # ---- external state (called from the pipeline observer) ----
+    def on_bot_speech_start(self) -> None:
+        if self._unmute_task:
+            self._unmute_task.cancel()
+            self._unmute_task = None
+        self._muted = True
+
+    def on_bot_speech_end(self) -> None:
+        async def unmute():
+            await asyncio.sleep(self._tail)
+            self._muted = False
+        if self._unmute_task:
+            self._unmute_task.cancel()
+        self._unmute_task = asyncio.get_event_loop().create_task(unmute())
+
+    # ---- frame processing ----
+    async def process_frame(self, frame, direction) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, UserAudioRawFrame) and self._muted:
+            return  # drop mic audio while the bot is speaking
+        await self.push_frame(frame, direction)
 
 def _llm_messages(context) -> list:
     """Serialize an LLMContext's messages for the dashboard (defensive, truncated)."""
@@ -79,6 +121,7 @@ class VoicePipelineAgent:
             input_device_index=int(Config.AUDIO_INPUT_DEVICE) if Config.AUDIO_INPUT_DEVICE else None,
             output_device_index=int(Config.AUDIO_OUTPUT_DEVICE) if Config.AUDIO_OUTPUT_DEVICE else None,
         ))
+        echo_gate = EchoGateProcessor(Config.MIC_GATE_TAIL_SECS) if Config.MIC_GATE_DURING_TTS else None
         vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(
             confidence=Config.VAD_CONFIDENCE,
             start_secs=Config.VAD_START_SECS,
@@ -321,6 +364,7 @@ class VoicePipelineAgent:
 
         pipeline = Pipeline([
             transport.input(),
+            *( [echo_gate] if echo_gate else [] ),
             stt,
             vad,
             aggregators.user(),
@@ -330,6 +374,7 @@ class VoicePipelineAgent:
             transport.output(),
         ])
         worker = PipelineWorker(pipeline, observers=[observer.pipecat_observer()])
+        observer.echo_gate = echo_gate   # gate mutes mic while bot speaks
 
         # Task announcements (append_to_context=False: spoken text must never enter
         # the LLM context).
