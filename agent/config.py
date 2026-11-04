@@ -72,7 +72,7 @@ class Config:
     ECHO_DETECTOR = _env("ECHO_DETECTOR", "1") == "1"
     ECHO_CORR_THRESHOLD = float(_env("ECHO_CORR_THRESHOLD", "0.32"))
     ECHO_DECISION_WINDOW = float(_env("ECHO_DECISION_WINDOW", "2.0"))
-    ECHO_TEXT_WINDOW = float(_env("ECHO_TEXT_WINDOW", "4.0"))
+    ECHO_TEXT_WINDOW = float(_env("ECHO_TEXT_WINDOW", "3.0"))   # secs after playback end
     ECHO_TEXT_SIMILARITY = float(_env("ECHO_TEXT_SIMILARITY", "0.65"))
     ECHO_DECIDE_MS = int(_env("ECHO_DECIDE_MS", "400"))      # audio held before deciding
     ECHO_SILENCE_RMS = float(_env("ECHO_SILENCE_RMS", "0.006"))  # speech-level floor (0..1)

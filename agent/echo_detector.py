@@ -170,6 +170,7 @@ class EchoState:
         self.ref: list[tuple[float, np.ndarray]] = []   # (wallclock, 16k float32)
         self.bot_texts: list[tuple[float, str]] = []    # (wallclock, normalized)
         self.last_suppressed = 0.0                      # last echo-suppression time
+        self.last_playback_end = 0.0                    # last BotStoppedSpeaking
 
     def add_played(self, samples_16k: np.ndarray) -> None:
         now = time.monotonic()
@@ -392,7 +393,11 @@ class EchoTranscriptGuard(FrameProcessor):
         norm = _normalize(text or "")
         if not norm:
             return False
-        recent = self._state.recent_bot_text(self._text_window)
+        # the window opens at PLAYBACK end (the observer records it), not text
+        # generation — reverb tails arrive seconds after the audio finishes
+        if time.monotonic() - self._state.last_playback_end > self._text_window:
+            return False
+        recent = self._state.recent_bot_text(10.0)
         if not recent:
             return False
         if len(norm) < 6:

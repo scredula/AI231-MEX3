@@ -179,6 +179,7 @@ async def test_silence_resets_dropping_state():
 async def test_guard_drops_transcript_matching_bot_text():
     state = EchoState()
     state.add_bot_text("Yes, I can hear you loud and clear — what can I help you with?")
+    state.last_playback_end = __import__("time").monotonic()
     guard = EchoTranscriptGuard(state)
     sink = Collector()
     await run_through(guard, [TranscriptionFrame("I can hear you loud and clear", "", "0")], sink)
@@ -189,6 +190,7 @@ async def test_guard_drops_transcript_matching_bot_text():
 async def test_guard_keeps_genuine_reply():
     state = EchoState()
     state.add_bot_text("Can you hear me okay?")
+    state.last_playback_end = __import__("time").monotonic()
     guard = EchoTranscriptGuard(state)
     sink = Collector()
     await run_through(guard, [TranscriptionFrame("Yes you sound great", "", "0")], sink)
@@ -199,6 +201,7 @@ async def test_guard_keeps_genuine_reply():
 async def test_guard_drops_interim_echo():
     state = EchoState()
     state.add_bot_text("I'm listening — go ahead.")
+    state.last_playback_end = __import__("time").monotonic()
     guard = EchoTranscriptGuard(state)
     sink = Collector()
     await run_through(guard, [InterimTranscriptionFrame("I'm listening", "", "0")], sink)
@@ -210,6 +213,7 @@ async def test_guard_ignores_when_bot_quiet():
     state = EchoState()
     import time as _t
     state.bot_texts = [(_t.monotonic() - 10.0, "old sentence")]  # well outside the window
+    state.last_playback_end = _t.monotonic() - 5.0               # playback ended long ago
     guard = EchoTranscriptGuard(state, text_window=1.0)
     sink = Collector()
     await run_through(guard, [TranscriptionFrame("old sentence", "", "0")], sink)
@@ -219,6 +223,7 @@ async def test_guard_ignores_when_bot_quiet():
 async def test_guard_drops_short_fragments_of_bot_speech():
     state = EchoState()
     state.add_bot_text("Yep, I'm here and listening — what can I do for you?")
+    state.last_playback_end = __import__("time").monotonic()
     guard = EchoTranscriptGuard(state)
     sink = Collector()
     await run_through(guard, [TranscriptionFrame("I", "", "0"),
@@ -230,6 +235,7 @@ async def test_guard_drops_short_fragments_of_bot_speech():
 async def test_guard_keeps_genuine_short_reply_not_in_bot_text():
     state = EchoState()
     state.add_bot_text("What would you like me to do?")
+    state.last_playback_end = __import__("time").monotonic()
     guard = EchoTranscriptGuard(state)
     sink = Collector()
     await run_through(guard, [TranscriptionFrame("no", "", "0")], sink)
@@ -240,6 +246,7 @@ async def test_guard_keeps_genuine_short_reply_not_in_bot_text():
 async def test_guard_drops_stutter_echo_right_after_bot_speech():
     state = EchoState()
     state.add_bot_text("It's just past midnight in New York — 12:08 AM on Wednesday.")
+    state.last_playback_end = __import__("time").monotonic()
     guard = EchoTranscriptGuard(state)
     sink = Collector()
     await run_through(guard, [TranscriptionFrame("It's just it's just", "", "0")], sink)
@@ -278,6 +285,7 @@ async def test_embargo_drops_garbled_echo_during_active_echo():
     state = EchoState()
     state.add_bot_text("It's just after midnight in New York — 12:16 AM on Wednesday, November 4th.")
     state.last_suppressed = __import__("time").monotonic() - 0.5   # echo active NOW
+    state.last_playback_end = __import__("time").monotonic()
     guard = EchoTranscriptGuard(state)
     sink = Collector()
     await run_through(guard, [TranscriptionFrame("Six to sixteen AM on Wednesday.", "", "0")], sink)
@@ -290,6 +298,7 @@ async def test_embargo_expires_genuine_followup_passes():
     state = EchoState()
     state.add_bot_text("It's just after midnight in New York — 12:16 AM on Wednesday.")
     state.last_suppressed = _t.monotonic() - 5.0   # no recent suppression
+    state.last_playback_end = _t.monotonic() - 4.0  # outside the 3s window anyway
     guard = EchoTranscriptGuard(state)
     sink = Collector()
     await run_through(guard, [TranscriptionFrame("what about Manila?", "", "0")], sink)

@@ -8,6 +8,7 @@
 """
 import json
 import logging
+import time
 import queue
 import threading
 import time
@@ -228,6 +229,8 @@ class DashboardObserver:
         elif isinstance(frame, BotStoppedSpeakingFrame):
             if getattr(self, "echo_gate", None):
                 self.echo_gate.on_bot_speech_end()
+            if getattr(self, "echo_detector", None):
+                self.echo_detector._state.last_playback_end = time.monotonic()
             t.end_turn()
         elif isinstance(frame, TTSSpeakFrame):
             if getattr(self, "echo_detector", None) and frame.text:
