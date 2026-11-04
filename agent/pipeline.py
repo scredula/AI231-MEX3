@@ -132,7 +132,8 @@ class VoicePipelineAgent:
             decision_window=Config.ECHO_DECISION_WINDOW,
             decide_ms=Config.ECHO_DECIDE_MS,
             silence_rms=Config.ECHO_SILENCE_RMS,
-            silence_ms=Config.ECHO_SILENCE_MS) if Config.ECHO_DETECTOR else None
+            silence_ms=Config.ECHO_SILENCE_MS,
+            spec_threshold=Config.ECHO_SPEC_THRESHOLD) if Config.ECHO_DETECTOR else None
         echo_guard = EchoTranscriptGuard(
             echo_state,
             text_window=Config.ECHO_TEXT_WINDOW,

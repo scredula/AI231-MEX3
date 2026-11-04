@@ -136,6 +136,8 @@ async def test_real_speech_flashes_through_and_gate_opens():
 
     user = (np.random.default_rng(6).standard_normal(int(0.5 * RATE)) * 0.3).astype(np.float32)
     frames = [audio_frame(user[i:i + 1600]) for i in range(0, len(user), 1600)]
+    silence = np.zeros(int(0.3 * RATE), np.float32)   # burst ends -> held tail must flush
+    frames += [audio_frame(silence[i:i + 1600]) for i in range(0, len(silence), 1600)]
     await run_through(det, frames, sink)
 
     passed = [f for f in sink.frames if isinstance(f, InputAudioRawFrame)]
@@ -231,4 +233,64 @@ async def test_guard_keeps_genuine_short_reply_not_in_bot_text():
     guard = EchoTranscriptGuard(state)
     sink = Collector()
     await run_through(guard, [TranscriptionFrame("no", "", "0")], sink)
+    assert any(isinstance(f, TranscriptionFrame) for f in sink.frames)
+
+
+@pytest.mark.asyncio
+async def test_guard_drops_stutter_echo_right_after_bot_speech():
+    state = EchoState()
+    state.add_bot_text("It's just past midnight in New York — 12:08 AM on Wednesday.")
+    guard = EchoTranscriptGuard(state)
+    sink = Collector()
+    await run_through(guard, [TranscriptionFrame("It's just it's just", "", "0")], sink)
+    assert not any(isinstance(f, TranscriptionFrame) for f in sink.frames)
+
+
+@pytest.mark.asyncio
+async def test_guard_keeps_late_genuine_reuse_of_bot_words():
+    import time as _t
+    state = EchoState()
+    state.add_bot_text("Would you like me to publish it to GitHub?")
+    state.bot_texts[-1] = (_t.monotonic() - 3.0, state.bot_texts[-1][1])  # 3s ago
+    guard = EchoTranscriptGuard(state)
+    sink = Collector()
+    await run_through(guard, [TranscriptionFrame("i would say yes please", "", "0")], sink)
+    assert any(isinstance(f, TranscriptionFrame) for f in sink.frames)
+
+
+@pytest.mark.asyncio
+async def test_quiet_echo_still_suppressed():
+    """Real-room failure mode: the echo is quieter than the old RMS floor."""
+    det, state = make_detector()
+    sink = Collector()
+    ref = await play_ref_async(state)
+    quiet_echo = ref * 0.05                     # well below the old 0.006 floor
+    frames = [audio_frame(quiet_echo[i:i + 1600]) for i in range(0, len(quiet_echo), 1600)]
+    await run_through(det, frames, sink)
+    voiced = [f for f in sink.frames if isinstance(f, InputAudioRawFrame)
+              and np.sqrt((np.frombuffer(f.audio, np.int16).astype(np.float32) / 32768.0) ** 2 .mean()) > 0.0015]
+    assert voiced == []
+    assert det._dropping is True
+
+
+@pytest.mark.asyncio
+async def test_embargo_drops_garbled_echo_during_active_echo():
+    state = EchoState()
+    state.add_bot_text("It's just after midnight in New York — 12:16 AM on Wednesday, November 4th.")
+    state.last_suppressed = __import__("time").monotonic() - 0.5   # echo active NOW
+    guard = EchoTranscriptGuard(state)
+    sink = Collector()
+    await run_through(guard, [TranscriptionFrame("Six to sixteen AM on Wednesday.", "", "0")], sink)
+    assert not any(isinstance(f, TranscriptionFrame) for f in sink.frames)
+
+
+@pytest.mark.asyncio
+async def test_embargo_expires_genuine_followup_passes():
+    import time as _t
+    state = EchoState()
+    state.add_bot_text("It's just after midnight in New York — 12:16 AM on Wednesday.")
+    state.last_suppressed = _t.monotonic() - 5.0   # no recent suppression
+    guard = EchoTranscriptGuard(state)
+    sink = Collector()
+    await run_through(guard, [TranscriptionFrame("what about Manila?", "", "0")], sink)
     assert any(isinstance(f, TranscriptionFrame) for f in sink.frames)

@@ -70,13 +70,14 @@ class Config:
     # user speech by cross-correlating mic audio against recently played audio.
     # Recommended over the mic gate; the gate remains available as a fallback.
     ECHO_DETECTOR = _env("ECHO_DETECTOR", "1") == "1"
-    ECHO_CORR_THRESHOLD = float(_env("ECHO_CORR_THRESHOLD", "0.4"))
+    ECHO_CORR_THRESHOLD = float(_env("ECHO_CORR_THRESHOLD", "0.32"))
     ECHO_DECISION_WINDOW = float(_env("ECHO_DECISION_WINDOW", "2.0"))
     ECHO_TEXT_WINDOW = float(_env("ECHO_TEXT_WINDOW", "4.0"))
     ECHO_TEXT_SIMILARITY = float(_env("ECHO_TEXT_SIMILARITY", "0.65"))
-    ECHO_DECIDE_MS = int(_env("ECHO_DECIDE_MS", "240"))      # audio held before deciding
+    ECHO_DECIDE_MS = int(_env("ECHO_DECIDE_MS", "400"))      # audio held before deciding
     ECHO_SILENCE_RMS = float(_env("ECHO_SILENCE_RMS", "0.006"))  # speech-level floor (0..1)
     ECHO_SILENCE_MS = int(_env("ECHO_SILENCE_MS", "150"))    # silence that resets the detector
+    ECHO_SPEC_THRESHOLD = float(_env("ECHO_SPEC_THRESHOLD", "0.80"))  # spectral-envelope vote
 
 
     # Reasoning models (e.g. nemotron) stream their thinking into the response

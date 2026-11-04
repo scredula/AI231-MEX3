@@ -99,6 +99,69 @@ def _corr_score(seg: np.ndarray, ref: np.ndarray, max_lag: int | None = None) ->
     return float(np.max(scores) / seg_norm)
 
 
+_NUM_WORDS = {0: "zero", 1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
+              6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven",
+              12: "twelve", 13: "thirteen", 14: "fourteen", 15: "fifteen",
+              16: "sixteen", 17: "seventeen", 18: "eighteen", 19: "nineteen",
+              20: "twenty", 30: "thirty", 40: "forty", 50: "fifty", 60: "sixty",
+              70: "seventy", 80: "eighty", 90: "ninety"}
+
+
+def _spoken_form(norm: str) -> str:
+    """Expand digits to words so text matching survives number normalization:
+    the TTS speaks "12:16 AM" but a mis-heard echo transcribes "sixteen"."""
+    out = []
+    for tok in norm.split():
+        if tok.isdigit():
+            n = int(tok)
+            if n in _NUM_WORDS:
+                out.append(_NUM_WORDS[n])
+            elif 21 <= n <= 99 and n % 10:
+                tens = (n // 10) * 10
+                out.append(_NUM_WORDS.get(tens, "") + " " + _NUM_WORDS.get(n % 10, str(n % 10)))
+            else:
+                out.append(tok)
+        else:
+            out.append(tok)
+    return " ".join(out)
+
+
+_N_BANDS = 24
+
+
+def _spec_profile(samples16k: np.ndarray) -> np.ndarray:
+    """Mean log-power spectrum over log-spaced bands (100 Hz - 7 kHz) — a
+    speaker/timbre fingerprint that survives reverb and time shifts."""
+    if samples16k.size < 800:
+        return np.zeros(_N_BANDS)
+    n = 1024
+    hop = 512
+    frames = [samples16k[i:i + n] for i in range(0, samples16k.size - n, hop)]
+    if not frames:
+        return np.zeros(_N_BANDS)
+    win = np.hanning(n).astype(np.float32)
+    spec = np.abs(np.fft.rfft(np.stack(frames) * win, axis=1)) ** 2
+    freqs = np.fft.rfftfreq(n, 1 / 16000)
+    edges = np.geomspace(100, 7000, _N_BANDS + 1)
+    bands = np.empty(_N_BANDS)
+    for b in range(_N_BANDS):
+        m = (freqs >= edges[b]) & (freqs < edges[b + 1])
+        bands[b] = spec[:, m].mean() if m.any() else 0.0
+    bands = np.log10(bands + 1e-10)
+    bands -= bands.mean()
+    nrm = np.linalg.norm(bands)
+    return bands / nrm if nrm > 1e-9 else bands
+
+
+def _spec_similarity(seg: np.ndarray, ref: np.ndarray) -> float:
+    """Cosine similarity of spectral profiles: ~1 for the same voice/channel
+    (echo), lower for a different speaker (the user)."""
+    p_seg = _spec_profile(seg)
+    p_ref = _spec_profile(ref)
+    den = np.linalg.norm(p_seg) * np.linalg.norm(p_ref)
+    return float(p_seg @ p_ref / den) if den > 1e-9 else 0.0
+
+
 class EchoState:
     """Shared state: recently-played TTS audio + recent bot text."""
 
@@ -106,6 +169,7 @@ class EchoState:
         self.ref_secs = ref_secs
         self.ref: list[tuple[float, np.ndarray]] = []   # (wallclock, 16k float32)
         self.bot_texts: list[tuple[float, str]] = []    # (wallclock, normalized)
+        self.last_suppressed = 0.0                      # last echo-suppression time
 
     def add_played(self, samples_16k: np.ndarray) -> None:
         now = time.monotonic()
@@ -123,7 +187,11 @@ class EchoState:
     def add_bot_text(self, text: str) -> None:
         norm = _normalize(text or "")
         if norm:
-            self.bot_texts.append((time.monotonic(), norm))
+            now = time.monotonic()
+            self.bot_texts.append((now, norm))
+            spoken = _spoken_form(norm)
+            if spoken != norm:
+                self.bot_texts.append((now, spoken))
             self._trim(self.bot_texts, 30.0)
 
     def recent_bot_text(self, within_secs: float) -> str:
@@ -170,10 +238,12 @@ class EchoDetectorProcessor(FrameProcessor):
 
     def __init__(self, state: EchoState, corr_threshold: float = 0.4,
                  decision_window: float = 2.5, decide_ms: int = 240,
-                 silence_rms: float = 0.006, silence_ms: int = 150):
+                 silence_rms: float = 0.006, silence_ms: int = 150,
+                 spec_threshold: float = 0.93):
         super().__init__()
         self._state = state
         self._threshold = corr_threshold
+        self._spec_threshold = spec_threshold
         self._decision_window = decision_window
         self._decide_samples = int(decide_ms * 16)       # ms -> samples @16k
         self._silence_rms = silence_rms
@@ -183,6 +253,7 @@ class EchoDetectorProcessor(FrameProcessor):
         self._buf: list[tuple[object, np.ndarray]] = []  # (original frame, 16k copy)
         self._silence_run = 0.0           # accumulated AUDIO seconds of silence
         self._mic_frames = 0
+        self._low_run = 0                 # consecutive below-threshold decisions
 
     # ---- helpers ----
     def _flush(self) -> None:
@@ -199,6 +270,7 @@ class EchoDetectorProcessor(FrameProcessor):
         self._buf.clear()
         self._holding = False
         self._dropping = True
+        self._state.last_suppressed = time.monotonic()
 
     # ---- frame processing ----
     async def process_frame(self, frame, direction) -> None:
@@ -223,43 +295,81 @@ class EchoDetectorProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
-        # echo-risk window active
+        # echo-risk window active: EVERYTHING is buffered and correlated — the
+        # correlation itself separates echo from noise/voice (an RMS floor here
+        # would misclassify the attenuated echo as silence and let it through)
         pcm = np.frombuffer(frame.audio, dtype=np.int16).astype(np.float32) / 32768.0
         rate = getattr(frame, "sample_rate", 16000) or 16000
         samples16k = _resample_linear(pcm, rate, 16000)
         rms = float(np.sqrt((samples16k * samples16k).mean())) if samples16k.size else 0.0
-        now = time.monotonic()
 
         if rms < self._silence_rms:
-            # accumulate AUDIO time (robust to bursty frame delivery), not wallclock
+            # digital near-silence: passes through, feeds the silence-run counter
             self._silence_run += samples16k.size / 16000.0
             if self._silence_run >= self._silence_secs:
-                # sustained silence: the echo burst is over — reset the state machine
+                # the burst is over — flush anything held and reopen
                 if self._holding and self._buf:
-                    self._flush()          # let STT/VAD see it; the guard cleans up
+                    self._flush()
                 self._dropping = False
-            await self.push_frame(frame, direction)   # silence is harmless
+                self._low_run = 0
+                self._buf.clear()
+                self._holding = False
+            await self.push_frame(frame, direction)
             return
         self._silence_run = 0.0
 
         if self._dropping:
-            return  # echo confirmed for this burst — keep suppressing
+            # echo confirmed for this burst — keep suppressing, but keep scoring
+            # on a rolling window so a genuine loud barge-in can take over
+            self._buf.append((frame, samples16k))
+            if len(self._buf) > 100:            # cap the rolling window (~1 s)
+                self._buf = self._buf[-50:]
+            held = np.concatenate([s for _, s in self._buf])
+            if held.size >= self._decide_samples:
+                seg = held[-self._decide_samples:]
+                score = _corr_score(seg, ref)
+                spec = _spec_similarity(seg, ref)
+                echo = score >= self._threshold or spec >= self._spec_threshold
+                log.info("echo re-decision: corr=%.3f spec=%.3f", score, spec)
+                if echo:
+                    self._state.last_suppressed = time.monotonic()
+                    self._low_run = 0
+                else:
+                    self._low_run += 1
+                    if self._low_run >= 2:      # two consecutive non-echo = real speech
+                        log.info("real speech takes over after %d low scores", self._low_run)
+                        self._dropping = False
+                        self._low_run = 0
+                        self._flush()
+                        return
+            return
 
         self._holding = True
         self._buf.append((frame, samples16k))
         held = np.concatenate([s for _, s in self._buf])
 
         if held.size >= self._decide_samples:
-            score = _corr_score(held, ref)
-            log.debug("echo decision score=%.3f threshold=%.2f", score, self._threshold)
-            if score >= self._threshold:
-                log.info("echo suppressed (corr=%.3f, %.0f ms held)",
-                         score, 1000 * held.size / 16000)
+            # dual vote: waveform correlation AND spectral-envelope similarity
+            seg = held[-self._decide_samples:]
+            score = _corr_score(seg, ref)
+            spec = _spec_similarity(seg, ref)
+            echo = score >= self._threshold or spec >= self._spec_threshold
+            log.info("echo decision: corr=%.3f spec=%.3f (thr %.2f/%.2f, %.0f ms)",
+                     score, spec, self._threshold, self._spec_threshold,
+                     1000 * held.size / 16000)
+            if echo:
+                log.info("echo suppressed — dropping burst")
                 self._discard()
+                self._low_run = 0
             else:
-                log.info("real speech confirmed (corr=%.3f) — flushing %.0f ms",
-                         score, 1000 * held.size / 16000)
+                log.info("real speech confirmed — flushing held audio")
                 self._flush()
+                self._low_run = 0
+                return  # current frame was part of the flushed block
+
+        if self._holding or self._dropping:
+            return  # held frames are flushed/rejected as a block
+        await self.push_frame(frame, direction)
 
         if self._holding or self._dropping:
             return  # held frames are flushed/rejected as a block
@@ -292,8 +402,29 @@ class EchoTranscriptGuard(FrameProcessor):
         if norm in recent:
             return True
         last = self._state.bot_texts[-1][1] if self._state.bot_texts else ""
-        return bool(last and
-                    difflib.SequenceMatcher(None, norm, last).ratio() >= self._text_similarity)
+        if last and difflib.SequenceMatcher(None, norm, last).ratio() >= self._text_similarity:
+            return True
+        # active-echo embargo: the detector just suppressed echo in this room —
+        # right now ANY transcript that shares words with the bot's recent
+        # speech is almost certainly a leaked echo fragment. Genuine replies
+        # survive (they introduce new words) or arrive later (window expires).
+        if time.monotonic() - self._state.last_suppressed <= 2.0:
+            bot_words = set(recent.split())
+            words = [w for w in norm.split() if len(w) >= 2]
+            if words and sum(w in bot_words for w in words) / len(words) >= 0.5:
+                log.info("embargoed transcript during active echo: %.40s", text)
+                return True
+        # stutter echo ("it's just it's just"): nearly all words come from the
+        # bot's last utterance AND the transcript lands right after it — genuine
+        # replies need reaction time, echoes don't
+        if self._state.bot_texts:
+            last_ts = self._state.bot_texts[-1][0]
+            if time.monotonic() - last_ts <= 1.2:
+                bot_words = set(last.split())
+                words = norm.split()
+                if words and sum(w in bot_words for w in words) / len(words) >= 0.8:
+                    return True
+        return False
 
     async def process_frame(self, frame, direction) -> None:
         await super().process_frame(frame, direction)
