@@ -3,10 +3,11 @@ import asyncio
 import numpy as np
 import pytest
 from pipecat.frames.frames import (
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
+    OutputAudioRawFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
-    UserAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -27,7 +28,8 @@ def pcm16(samples_f32, rate=RATE):
 
 
 def audio_frame(samples_f32, rate=RATE):
-    return UserAudioRawFrame(audio=pcm16(samples_f32, rate), sample_rate=rate, num_channels=1)
+    # the local transport pushes plain InputAudioRawFrame (not the subclass)
+    return InputAudioRawFrame(audio=pcm16(samples_f32, rate), sample_rate=rate, num_channels=1)
 
 
 class Collector(FrameProcessor):
@@ -121,7 +123,7 @@ async def test_echo_audio_never_reaches_stt():
     def rms(f):
         x = np.frombuffer(f.audio, dtype=np.int16).astype(np.float32) / 32768.0
         return float(np.sqrt((x * x).mean())) if x.size else 0.0
-    voiced = [f for f in sink.frames if isinstance(f, UserAudioRawFrame) and rms(f) > 0.006]
+    voiced = [f for f in sink.frames if isinstance(f, InputAudioRawFrame) and rms(f) > 0.006]
     assert voiced == []                # no speech-level echo audio reached downstream
     assert det._dropping is True
 
@@ -136,7 +138,7 @@ async def test_real_speech_flashes_through_and_gate_opens():
     frames = [audio_frame(user[i:i + 1600]) for i in range(0, len(user), 1600)]
     await run_through(det, frames, sink)
 
-    passed = [f for f in sink.frames if isinstance(f, UserAudioRawFrame)]
+    passed = [f for f in sink.frames if isinstance(f, InputAudioRawFrame)]
     assert len(passed) >= 3            # held ≤240 ms then flushed, then free flow
     total = sum(f.audio and len(f.audio) // 2 for f in passed)
     assert total >= int(0.4 * RATE)    # ~all of the utterance reached downstream
@@ -150,7 +152,7 @@ async def test_no_recent_tts_means_zero_interference():
     user = (np.random.default_rng(8).standard_normal(int(0.3 * RATE)) * 0.3).astype(np.float32)
     frames = [audio_frame(user[i:i + 1600]) for i in range(0, len(user), 1600)]
     await run_through(det, frames, sink)
-    assert len([f for f in sink.frames if isinstance(f, UserAudioRawFrame)]) == len(frames)
+    assert len([f for f in sink.frames if isinstance(f, InputAudioRawFrame)]) == len(frames)
 
 
 @pytest.mark.asyncio
@@ -209,4 +211,24 @@ async def test_guard_ignores_when_bot_quiet():
     guard = EchoTranscriptGuard(state, text_window=1.0)
     sink = Collector()
     await run_through(guard, [TranscriptionFrame("old sentence", "", "0")], sink)
+    assert any(isinstance(f, TranscriptionFrame) for f in sink.frames)
+
+@pytest.mark.asyncio
+async def test_guard_drops_short_fragments_of_bot_speech():
+    state = EchoState()
+    state.add_bot_text("Yep, I'm here and listening — what can I do for you?")
+    guard = EchoTranscriptGuard(state)
+    sink = Collector()
+    await run_through(guard, [TranscriptionFrame("I", "", "0"),
+                              TranscriptionFrame("Yep.", "", "0")], sink)
+    assert not any(isinstance(f, TranscriptionFrame) for f in sink.frames)
+
+
+@pytest.mark.asyncio
+async def test_guard_keeps_genuine_short_reply_not_in_bot_text():
+    state = EchoState()
+    state.add_bot_text("What would you like me to do?")
+    guard = EchoTranscriptGuard(state)
+    sink = Collector()
+    await run_through(guard, [TranscriptionFrame("no", "", "0")], sink)
     assert any(isinstance(f, TranscriptionFrame) for f in sink.frames)

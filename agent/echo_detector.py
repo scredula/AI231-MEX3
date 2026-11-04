@@ -36,10 +36,11 @@ import time
 
 import numpy as np
 from pipecat.frames.frames import (
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
+    OutputAudioRawFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
-    UserAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor
 
@@ -147,13 +148,20 @@ class TTSOutputTap(FrameProcessor):
     def __init__(self, state: EchoState, src_rate: int = 24000):
         super().__init__()
         self._state = state
-        self._src_rate = src_rate
+        self._default_rate = src_rate
+        self._seen = 0
 
     async def process_frame(self, frame, direction) -> None:
         await super().process_frame(frame, direction)
-        if isinstance(frame, TTSAudioRawFrame) and frame.audio:
+        # the TTS pushes TTSAudioRawFrame (OutputAudioRawFrame subclass); accept
+        # any output audio frame and trust the frame's own sample rate
+        if isinstance(frame, OutputAudioRawFrame) and frame.audio:
             pcm = np.frombuffer(frame.audio, dtype=np.int16).astype(np.float32) / 32768.0
-            self._state.add_played(_resample_linear(pcm, self._src_rate, 16000))
+            rate = getattr(frame, "sample_rate", None) or self._default_rate
+            self._state.add_played(_resample_linear(pcm, rate, 16000))
+            self._seen += 1
+            if self._seen % 100 == 0:
+                log.debug("tts tap: %d audio frames captured", self._seen)
         await self.push_frame(frame, direction)
 
 
@@ -174,6 +182,7 @@ class EchoDetectorProcessor(FrameProcessor):
         self._holding = False             # buffering while undecided
         self._buf: list[tuple[object, np.ndarray]] = []  # (original frame, 16k copy)
         self._silence_run = 0.0           # accumulated AUDIO seconds of silence
+        self._mic_frames = 0
 
     # ---- helpers ----
     def _flush(self) -> None:
@@ -195,9 +204,15 @@ class EchoDetectorProcessor(FrameProcessor):
     async def process_frame(self, frame, direction) -> None:
         await super().process_frame(frame, direction)
 
-        if not isinstance(frame, UserAudioRawFrame) or not frame.audio:
+        if not isinstance(frame, InputAudioRawFrame) or not frame.audio:
             await self.push_frame(frame, direction)
             return
+        self._mic_frames += 1
+        if self._mic_frames % 500 == 0:
+            ref = self._state.recent_ref(self._decision_window)
+            log.debug("echo detector alive: mic frames=%d, ref %s",
+                      self._mic_frames,
+                      f"{len(self._state.ref)} chunks" if ref is not None else "EMPTY")
 
         ref = self._state.recent_ref(self._decision_window)
         if ref is None:
@@ -265,11 +280,15 @@ class EchoTranscriptGuard(FrameProcessor):
 
     def _text_is_echo(self, text: str) -> bool:
         norm = _normalize(text or "")
-        if len(norm) < 3:
+        if not norm:
             return False
         recent = self._state.recent_bot_text(self._text_window)
         if not recent:
             return False
+        if len(norm) < 6:
+            # short fragments ("i", "yep", "take your time") must match a whole
+            # word the bot actually said — protects genuine "yes"/"no" replies
+            return bool(re.search(rf"\b{re.escape(norm)}\b", recent))
         if norm in recent:
             return True
         last = self._state.bot_texts[-1][1] if self._state.bot_texts else ""

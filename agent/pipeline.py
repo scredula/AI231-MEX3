@@ -14,7 +14,8 @@ import logging
 
 from agent.config import Config
 from agent.observability import DashboardObserver, EventBus
-from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, UserAudioRawFrame
+from pipecat.frames.frames import (BotStartedSpeakingFrame, BotStoppedSpeakingFrame,
+                                   InputAudioRawFrame)
 from pipecat.processors.frame_processor import FrameProcessor
 
 
@@ -66,7 +67,7 @@ class EchoGateProcessor(FrameProcessor):
     # ---- frame processing ----
     async def process_frame(self, frame, direction) -> None:
         await super().process_frame(frame, direction)
-        if isinstance(frame, UserAudioRawFrame) and self._muted:
+        if isinstance(frame, InputAudioRawFrame) and self._muted:
             return  # drop mic audio while the bot is speaking
         await self.push_frame(frame, direction)
 
