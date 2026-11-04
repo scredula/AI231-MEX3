@@ -65,6 +65,16 @@ class Config:
     MIC_GATE_DURING_TTS = _env("MIC_GATE_DURING_TTS", "1") == "1"
     MIC_GATE_TAIL_SECS = float(_env("MIC_GATE_TAIL_SECS", "0.6"))
 
+    # Echo detector (correlation): keeps the mic OPEN (barge-in works) and
+    # classifies each speech burst as room-echo of the bot's own TTS vs. real
+    # user speech by cross-correlating mic audio against recently played audio.
+    # Recommended over the mic gate; the gate remains available as a fallback.
+    ECHO_DETECTOR = _env("ECHO_DETECTOR", "1") == "1"
+    ECHO_CORR_THRESHOLD = float(_env("ECHO_CORR_THRESHOLD", "0.4"))
+    ECHO_DECISION_WINDOW = float(_env("ECHO_DECISION_WINDOW", "2.0"))
+    ECHO_TEXT_WINDOW = float(_env("ECHO_TEXT_WINDOW", "4.0"))
+    ECHO_TEXT_SIMILARITY = float(_env("ECHO_TEXT_SIMILARITY", "0.65"))
+
 
     # Reasoning models (e.g. nemotron) stream their thinking into the response
     # content. OpenRouter's reasoning.exclude moves it into a separate field so

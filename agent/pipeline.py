@@ -122,6 +122,15 @@ class VoicePipelineAgent:
             output_device_index=int(Config.AUDIO_OUTPUT_DEVICE) if Config.AUDIO_OUTPUT_DEVICE else None,
         ))
         echo_gate = EchoGateProcessor(Config.MIC_GATE_TAIL_SECS) if Config.MIC_GATE_DURING_TTS else None
+        from agent.echo_detector import EchoDetectorProcessor, EchoState, TTSOutputTap
+        echo_state = EchoState()
+        echo_detector = EchoDetectorProcessor(
+            echo_state,
+            corr_threshold=Config.ECHO_CORR_THRESHOLD,
+            decision_window=Config.ECHO_DECISION_WINDOW,
+            text_window=Config.ECHO_TEXT_WINDOW,
+            text_similarity=Config.ECHO_TEXT_SIMILARITY) if Config.ECHO_DETECTOR else None
+        tts_tap = TTSOutputTap(echo_state) if echo_detector else None
         vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(
             confidence=Config.VAD_CONFIDENCE,
             start_secs=Config.VAD_START_SECS,
@@ -367,14 +376,17 @@ class VoicePipelineAgent:
             *( [echo_gate] if echo_gate else [] ),
             stt,
             vad,
+            *( [echo_detector] if echo_detector else [] ),
             aggregators.user(),
             llm,
             tts,
             aggregators.assistant(),
+            *( [tts_tap] if tts_tap else [] ),
             transport.output(),
         ])
         worker = PipelineWorker(pipeline, observers=[observer.pipecat_observer()])
         observer.echo_gate = echo_gate   # gate mutes mic while bot speaks
+        observer.echo_detector = echo_detector  # feeds bot text for echo matching
 
         # Task announcements (append_to_context=False: spoken text must never enter
         # the LLM context).

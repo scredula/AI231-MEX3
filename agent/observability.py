@@ -210,6 +210,8 @@ class DashboardObserver:
                         "result": str(result)[:2000]})
         elif isinstance(frame, LLMTextFrame):
             text = str(getattr(frame, "text", ""))
+            if text and getattr(self, "echo_detector", None):
+                self.echo_detector._state.add_bot_text(text)
             if not t.t_llm_first_token:
                 t.t_llm_first_token = now
                 self._emit({"type": "first_token", "turn": t.turn_id, "t_ms": tms,
@@ -228,6 +230,8 @@ class DashboardObserver:
                 self.echo_gate.on_bot_speech_end()
             t.end_turn()
         elif isinstance(frame, TTSSpeakFrame):
+            if getattr(self, "echo_detector", None) and frame.text:
+                self.echo_detector._state.add_bot_text(str(frame.text))
             self._emit({"type": "announcement", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed, "text": str(frame.text)[:300]})
         elif isinstance(frame, ErrorFrame):
