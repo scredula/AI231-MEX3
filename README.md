@@ -103,3 +103,25 @@ documented there.
   on-device, Pi 5 memory/CPU behaviour. These need the physical Raspberry Pi; the code
   paths use Pipecat's documented 1.14 API and are unit-verified by import and mocked
   pipeline tests.
+
+
+## Raspberry Pi audio: echo cancellation
+
+Speaker setups hear the TTS through the microphone. The Pi fix is OS-level:
+
+```bash
+bash scripts/setup_pi_audio.sh     # installs PipeWire echo-cancel (WebRTC AEC)
+```
+
+Then point `.env` at the virtual devices it creates (see the script output,
+or `python3 scripts/list_audio_devices.py`):
+
+```
+AUDIO_INPUT_DEVICE=<Echo-Cancel Source index>
+AUDIO_OUTPUT_DEVICE=<Echo-Cancel Sink index>
+ECHO_DETECTOR=0
+```
+
+The software echo detector (`agent/echo_detector.py`, `ECHO_DETECTOR=1`) is a
+fallback for speaker setups without OS AEC — it holds mic audio during
+echo-risk windows and cross-correlates it against the played TTS audio.
