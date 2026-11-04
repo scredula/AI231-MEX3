@@ -1,23 +1,32 @@
-"""Echo detection: classify mic bursts as either the room echo of the bot's own
-TTS playback or genuine user speech — by correlating the mic audio against the
-audio we just played.
+"""Echo suppression at the AUDIO level: keeps the mic open (barge-in works)
+while preventing the speakers' TTS output from being transcribed back as user
+speech.
 
-Why: the echo gate (mute mic during TTS) kills the "agent hears itself" bug but
-also kills barge-in. This detector keeps the mic OPEN and decides per speech
-burst: if the mic signal is a delayed copy of recently-played TTS audio (FFT
-cross-correlation over a lag sweep), the whole burst is suppressed — no
-interruption, no transcript, nothing enters the LLM context. If it doesn't
-match the played audio, it's a real user speaking and flows through normally,
-including mid-TTS interruptions.
+Why audio-level, not frame-veto: pipecat 1.14's VADProcessor BROADCASTS
+VADUserStartedSpeakingFrame and the user aggregator decides interruptions
+internally — a processor sitting after the VAD cannot veto the decision. So the
+detector must sit BEFORE the VAD/STT and simply not hand echo audio downstream.
 
-A transcript backstop catches what the correlation misses: any user transcript
-arriving shortly after bot speech that fuzzy-matches the bot's own recent text
-is discarded.
+Mechanism (EchoDetectorProcessor, placed between mic capture and STT):
+- While no TTS played recently: audio passes straight through (zero added
+  latency).
+- While TTS played recently (echo-risk window): speech-level mic audio is held
+  in a short decision buffer (not forwarded). Every ECHO_DECIDE_MS of buffered
+  speech, it is cross-correlated against the recently played audio:
+    * echo-like  -> keep holding/dropping (the burst is the bot hearing itself)
+    * not echo   -> flush the whole buffer downstream and open the gate: a real
+      barge-in reaches VAD/STT after at most ~240 ms of withheld audio
+- Silence longer than ECHO_SILENCE_MS resets the state machine.
 
-Wiring (pipeline):
-  transport.input() -> stt -> vad -> EchoDetectorProcessor -> user aggregator
-  aggregators.assistant() -> TTSOutputTap -> transport.output()
-The observer feeds bot text (LLMTextFrame deltas, TTSSpeakFrame) via on_bot_text.
+The reference signal is recorded by TTSOutputTap (between the assistant
+aggregator and the output transport) and resampled to 16 kHz mono.
+
+EchoTranscriptGuard (after the VAD, before the user aggregator) is the backstop:
+transcripts arriving shortly after bot speech that fuzzy-match the bot's own
+recent text are discarded — covers reverb tails that leak past the correlation.
+
+The observer feeds bot text (LLMTextFrame deltas, TTSSpeakFrame) into the shared
+EchoState via add_bot_text.
 """
 import asyncio
 import difflib
@@ -31,8 +40,6 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TTSAudioRawFrame,
     UserAudioRawFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor
 
@@ -61,8 +68,8 @@ def _corr_score(seg: np.ndarray, ref: np.ndarray, max_lag: int | None = None) ->
 
     The mic window can sit anywhere inside the reference ring buffer (its offset
     absorbs playback-buffer delay), so we sweep every lag up to
-    ref.size - seg.size. Both float32 mono; returns the max Pearson-style
-    coefficient: ~1 for a delayed copy (echo), ~0 for unrelated audio.
+    ref.size - seg.size. Returns the max Pearson-style coefficient: high for a
+    delayed copy (echo), low for unrelated audio (real speech).
     """
     if seg.size < 400 or ref.size < seg.size:
         return 0.0
@@ -73,11 +80,11 @@ def _corr_score(seg: np.ndarray, ref: np.ndarray, max_lag: int | None = None) ->
     nfft = 1 << int(np.ceil(np.log2(ref.size + seg.size)))
     fs = np.fft.rfft(seg, nfft)
     fr = np.fft.rfft(ref, nfft)
-    xcorr = np.fft.irfft(fr * np.conj(fs), nfft)  # x[k] = sum ref[n+k]*seg[n] — peak at the mic-window offset within ref
+    xcorr = np.fft.irfft(fr * np.conj(fs), nfft)  # x[k] = sum ref[n+k]*seg[n]
     lags = ref.size - seg.size if max_lag is None else min(max_lag, ref.size - seg.size)
     if lags <= 0:
         return 0.0
-    # sliding energy of ref at each lag via cumsum (O(n), not O(n*seg))
+    # sliding energy of ref at each lag via cumsum (O(n))
     # window sum at lag k = sum(ref[k:k+seg.size]**2) = cs[seg.size-1+k] - cs[k-1]
     ref2 = np.cumsum((ref * ref).astype(np.float64))
     win = np.empty(lags + 1)
@@ -94,14 +101,11 @@ def _corr_score(seg: np.ndarray, ref: np.ndarray, max_lag: int | None = None) ->
 class EchoState:
     """Shared state: recently-played TTS audio + recent bot text."""
 
-    def __init__(self, ref_secs: float = 4.0, mic_secs: float = 1.5):
+    def __init__(self, ref_secs: float = 4.0):
         self.ref_secs = ref_secs
-        self.mic_secs = mic_secs
         self.ref: list[tuple[float, np.ndarray]] = []   # (wallclock, 16k float32)
-        self.mic: list[tuple[float, np.ndarray]] = []
         self.bot_texts: list[tuple[float, str]] = []    # (wallclock, normalized)
 
-    # ---- played TTS audio (from the output tap) ----
     def add_played(self, samples_16k: np.ndarray) -> None:
         now = time.monotonic()
         if samples_16k.size:
@@ -109,25 +113,12 @@ class EchoState:
             self._trim(self.ref, self.ref_secs)
 
     def recent_ref(self, within_secs: float) -> np.ndarray | None:
-        """Concatenated played audio, or None if nothing played recently."""
         now = time.monotonic()
         fresh = [(t, s) for t, s in self.ref if now - t <= within_secs]
         if not fresh:
             return None
         return np.concatenate([s for _, s in fresh])
 
-    # ---- mic audio (from the detector itself) ----
-    def add_mic(self, samples: np.ndarray) -> None:
-        now = time.monotonic()
-        self.mic.append((now, samples))
-        self._trim(self.mic, self.mic_secs)
-
-    def recent_mic(self, secs: float = 0.4) -> np.ndarray:
-        now = time.monotonic()
-        fresh = [s for t, s in self.mic if now - t <= secs]
-        return np.concatenate(fresh) if fresh else np.zeros(0, np.float32)
-
-    # ---- bot text (fed by the observer) ----
     def add_bot_text(self, text: str) -> None:
         norm = _normalize(text or "")
         if norm:
@@ -167,33 +158,110 @@ class TTSOutputTap(FrameProcessor):
 
 
 class EchoDetectorProcessor(FrameProcessor):
-    """See module docstring. Must be placed AFTER the VAD processor (it acts on
-    UserStartedSpeakingFrame) and BEFORE the user context aggregator (it can
-    veto the frame, suppressing the interruption/turn)."""
+    """Audio-level echo suppression. Place between mic capture and STT."""
 
     def __init__(self, state: EchoState, corr_threshold: float = 0.4,
-                 decision_window: float = 2.0, text_window: float = 4.0,
-                 text_similarity: float = 0.65, decision_mic_secs: float = 0.4):
+                 decision_window: float = 2.5, decide_ms: int = 240,
+                 silence_rms: float = 0.006, silence_ms: int = 150):
         super().__init__()
         self._state = state
-        self._corr_threshold = corr_threshold
+        self._threshold = corr_threshold
         self._decision_window = decision_window
-        self._text_window = text_window
-        self._text_similarity = text_similarity
-        self._decision_mic_secs = decision_mic_secs
-        self._dropping = False
-        self._last_verdict = None
+        self._decide_samples = int(decide_ms * 16)       # ms -> samples @16k
+        self._silence_rms = silence_rms
+        self._silence_secs = silence_ms / 1000.0
+        self._dropping = False            # currently suppressing (echo confirmed)
+        self._holding = False             # buffering while undecided
+        self._buf: list[tuple[object, np.ndarray]] = []  # (original frame, 16k copy)
+        self._silence_run = 0.0           # accumulated AUDIO seconds of silence
 
-    # ---- burst classification ----
-    def _is_echo(self) -> bool:
+    # ---- helpers ----
+    def _flush(self) -> None:
+        """Push every held frame downstream, in order."""
+        buf, self._buf = self._buf, []
+        self._holding = False
+        self._dropping = False
+        async def _push_all():
+            for frame, _ in buf:
+                await self.push_frame(frame)
+        asyncio.get_event_loop().create_task(_push_all())
+
+    def _discard(self) -> None:
+        self._buf.clear()
+        self._holding = False
+        self._dropping = True
+
+    # ---- frame processing ----
+    async def process_frame(self, frame, direction) -> None:
+        await super().process_frame(frame, direction)
+
+        if not isinstance(frame, UserAudioRawFrame) or not frame.audio:
+            await self.push_frame(frame, direction)
+            return
+
         ref = self._state.recent_ref(self._decision_window)
         if ref is None:
-            return False
-        mic = self._state.recent_mic(self._decision_mic_secs)
-        score = _corr_score(mic, ref)
-        self._last_verdict = round(score, 3)
-        log.debug("echo correlation score=%.3f threshold=%.2f", score, self._corr_threshold)
-        return score >= self._corr_threshold
+            # no recent TTS — everything passes, reset any held state
+            if self._buf:
+                self._flush()
+            self._dropping = False
+            await self.push_frame(frame, direction)
+            return
+
+        # echo-risk window active
+        pcm = np.frombuffer(frame.audio, dtype=np.int16).astype(np.float32) / 32768.0
+        rate = getattr(frame, "sample_rate", 16000) or 16000
+        samples16k = _resample_linear(pcm, rate, 16000)
+        rms = float(np.sqrt((samples16k * samples16k).mean())) if samples16k.size else 0.0
+        now = time.monotonic()
+
+        if rms < self._silence_rms:
+            # accumulate AUDIO time (robust to bursty frame delivery), not wallclock
+            self._silence_run += samples16k.size / 16000.0
+            if self._silence_run >= self._silence_secs:
+                # sustained silence: the echo burst is over — reset the state machine
+                if self._holding and self._buf:
+                    self._flush()          # let STT/VAD see it; the guard cleans up
+                self._dropping = False
+            await self.push_frame(frame, direction)   # silence is harmless
+            return
+        self._silence_run = 0.0
+
+        if self._dropping:
+            return  # echo confirmed for this burst — keep suppressing
+
+        self._holding = True
+        self._buf.append((frame, samples16k))
+        held = np.concatenate([s for _, s in self._buf])
+
+        if held.size >= self._decide_samples:
+            score = _corr_score(held, ref)
+            log.debug("echo decision score=%.3f threshold=%.2f", score, self._threshold)
+            if score >= self._threshold:
+                log.info("echo suppressed (corr=%.3f, %.0f ms held)",
+                         score, 1000 * held.size / 16000)
+                self._discard()
+            else:
+                log.info("real speech confirmed (corr=%.3f) — flushing %.0f ms",
+                         score, 1000 * held.size / 16000)
+                self._flush()
+
+        if self._holding or self._dropping:
+            return  # held frames are flushed/rejected as a block
+        await self.push_frame(frame, direction)
+
+
+class EchoTranscriptGuard(FrameProcessor):
+    """Backstop placed AFTER the VAD and BEFORE the user aggregator: drops
+    transcripts that fuzzy-match the bot's own recent speech (reverb tails the
+    audio-level detector let through)."""
+
+    def __init__(self, state: EchoState, text_window: float = 4.0,
+                 text_similarity: float = 0.65):
+        super().__init__()
+        self._state = state
+        self._text_window = text_window
+        self._text_similarity = text_similarity
 
     def _text_is_echo(self, text: str) -> bool:
         norm = _normalize(text or "")
@@ -204,48 +272,14 @@ class EchoDetectorProcessor(FrameProcessor):
             return False
         if norm in recent:
             return True
-        # compare against the single most recent bot utterance for a sane ratio
         last = self._state.bot_texts[-1][1] if self._state.bot_texts else ""
-        if last and difflib.SequenceMatcher(None, norm, last).ratio() >= self._text_similarity:
-            return True
-        return False
+        return bool(last and
+                    difflib.SequenceMatcher(None, norm, last).ratio() >= self._text_similarity)
 
-    # ---- frame processing ----
     async def process_frame(self, frame, direction) -> None:
         await super().process_frame(frame, direction)
-
-        if isinstance(frame, UserAudioRawFrame) and frame.audio:
-            pcm = np.frombuffer(frame.audio, dtype=np.int16).astype(np.float32) / 32768.0
-            rate = getattr(frame, "sample_rate", 16000) or 16000
-            self._state.add_mic(_resample_linear(pcm, rate, 16000))
-            if self._dropping:
-                return  # suppress the whole classified-echo burst
-            await self.push_frame(frame, direction)
-            return
-
-        if isinstance(frame, UserStartedSpeakingFrame):
-            if self._state.recent_ref(self._decision_window) is not None:
-                self._dropping = self._is_echo()
-                if self._dropping:
-                    log.info("echo burst suppressed (corr=%.3f)", self._last_verdict)
-            else:
-                self._dropping = False
-                self._last_verdict = None
-            if self._dropping:
-                return  # veto: no interruption, no user turn
-            await self.push_frame(frame, direction)
-            return
-
         if isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
-            if self._dropping or self._text_is_echo(str(getattr(frame, "text", ""))):
-                if not self._dropping:
-                    log.info("echo transcript suppressed (text match): %.60s",
-                             getattr(frame, "text", ""))
-                return  # never reaches the context / LLM
-            await self.push_frame(frame, direction)
-            return
-
-        if isinstance(frame, UserStoppedSpeakingFrame):
-            self._dropping = False
-
+            if self._text_is_echo(str(getattr(frame, "text", ""))):
+                log.info("echo transcript suppressed: %.60s", getattr(frame, "text", ""))
+                return
         await self.push_frame(frame, direction)

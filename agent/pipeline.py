@@ -122,12 +122,18 @@ class VoicePipelineAgent:
             output_device_index=int(Config.AUDIO_OUTPUT_DEVICE) if Config.AUDIO_OUTPUT_DEVICE else None,
         ))
         echo_gate = EchoGateProcessor(Config.MIC_GATE_TAIL_SECS) if Config.MIC_GATE_DURING_TTS else None
-        from agent.echo_detector import EchoDetectorProcessor, EchoState, TTSOutputTap
+        from agent.echo_detector import (EchoDetectorProcessor, EchoState,
+                                         EchoTranscriptGuard, TTSOutputTap)
         echo_state = EchoState()
         echo_detector = EchoDetectorProcessor(
             echo_state,
             corr_threshold=Config.ECHO_CORR_THRESHOLD,
             decision_window=Config.ECHO_DECISION_WINDOW,
+            decide_ms=Config.ECHO_DECIDE_MS,
+            silence_rms=Config.ECHO_SILENCE_RMS,
+            silence_ms=Config.ECHO_SILENCE_MS) if Config.ECHO_DETECTOR else None
+        echo_guard = EchoTranscriptGuard(
+            echo_state,
             text_window=Config.ECHO_TEXT_WINDOW,
             text_similarity=Config.ECHO_TEXT_SIMILARITY) if Config.ECHO_DETECTOR else None
         tts_tap = TTSOutputTap(echo_state) if echo_detector else None
@@ -374,9 +380,10 @@ class VoicePipelineAgent:
         pipeline = Pipeline([
             transport.input(),
             *( [echo_gate] if echo_gate else [] ),
+            *( [echo_detector] if echo_detector else [] ),
             stt,
             vad,
-            *( [echo_detector] if echo_detector else [] ),
+            *( [echo_guard] if echo_guard else [] ),
             aggregators.user(),
             llm,
             tts,

@@ -74,6 +74,9 @@ class Config:
     ECHO_DECISION_WINDOW = float(_env("ECHO_DECISION_WINDOW", "2.0"))
     ECHO_TEXT_WINDOW = float(_env("ECHO_TEXT_WINDOW", "4.0"))
     ECHO_TEXT_SIMILARITY = float(_env("ECHO_TEXT_SIMILARITY", "0.65"))
+    ECHO_DECIDE_MS = int(_env("ECHO_DECIDE_MS", "240"))      # audio held before deciding
+    ECHO_SILENCE_RMS = float(_env("ECHO_SILENCE_RMS", "0.006"))  # speech-level floor (0..1)
+    ECHO_SILENCE_MS = int(_env("ECHO_SILENCE_MS", "150"))    # silence that resets the detector
 
 
     # Reasoning models (e.g. nemotron) stream their thinking into the response
