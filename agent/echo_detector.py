@@ -331,7 +331,8 @@ class EchoDetectorProcessor(FrameProcessor):
                 score = _corr_score(seg, ref)
                 spec = _spec_similarity(seg, ref)
                 echo = score >= self._threshold or spec >= self._spec_threshold
-                log.info("echo re-decision: corr=%.3f spec=%.3f", score, spec)
+                seg_rms = float(np.sqrt((seg * seg).mean()))
+                log.info("echo re-decision: corr=%.3f spec=%.3f rms=%.4f", score, spec, seg_rms)
                 if echo:
                     self._state.last_suppressed = time.monotonic()
                     self._low_run = 0
@@ -354,9 +355,10 @@ class EchoDetectorProcessor(FrameProcessor):
             seg = held[-self._decide_samples:]
             score = _corr_score(seg, ref)
             spec = _spec_similarity(seg, ref)
+            seg_rms = float(np.sqrt((seg * seg).mean()))
             echo = score >= self._threshold or spec >= self._spec_threshold
-            log.info("echo decision: corr=%.3f spec=%.3f (thr %.2f/%.2f, %.0f ms)",
-                     score, spec, self._threshold, self._spec_threshold,
+            log.info("echo decision: corr=%.3f spec=%.3f rms=%.4f (thr %.2f/%.2f, %.0f ms)",
+                     score, spec, seg_rms, self._threshold, self._spec_threshold,
                      1000 * held.size / 16000)
             if echo:
                 log.info("echo suppressed — dropping burst")
