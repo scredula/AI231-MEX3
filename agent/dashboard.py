@@ -292,7 +292,7 @@ class DashboardServer:
                 Route("/api/events", history),
                 Route("/say", say, methods=["POST"]),
             ])
-            config = uvicorn.Config(app, host="127.0.0.1", port=self.port,
+            config = uvicorn.Config(app, host=Config.DASHBOARD_HOST, port=self.port,
                                     log_level="warning", loop="asyncio")
             uvicorn.Server(config).run()
         except Exception:

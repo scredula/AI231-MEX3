@@ -93,6 +93,9 @@ class Config:
 
     # Dashboard
     DASHBOARD_PORT = int(_env("DASHBOARD_PORT", "8900"))
+    # 127.0.0.1 = local only. Set 0.0.0.0 to open the dashboard to the network
+    # (the /say endpoint can drive the agent — don't expose on untrusted nets).
+    DASHBOARD_HOST = _env("DASHBOARD_HOST", "127.0.0.1")
 
     LOG_LEVEL = _env("LOG_LEVEL", "INFO")
 
