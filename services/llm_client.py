@@ -29,9 +29,21 @@ class OpenRouterClient:
             "Content-Type": "application/json",
         }
 
+    @staticmethod
+    def _reasoning_body() -> dict:
+        """OpenRouter reasoning params — thinking OFF by default (see pipeline._reasoning_body)."""
+        from agent.config import Config
+        body: dict = {}
+        if not Config.REASONING_ENABLED:
+            body["enabled"] = False
+        if Config.REASONING_EXCLUDE:
+            body["exclude"] = True
+        return body
+
     async def chat(self, messages: list, tools: list = None, temperature: float = 0.7) -> dict:
         """Non-streaming call. Returns the assistant message dict (with optional tool_calls)."""
-        body = {"model": self.model, "messages": messages, "temperature": temperature}
+        body = {"model": self.model, "messages": messages, "temperature": temperature,
+                "reasoning": self._reasoning_body()}
         if tools:
             body["tools"] = tools
         async with httpx.AsyncClient(timeout=60) as client:
@@ -43,7 +55,8 @@ class OpenRouterClient:
 
     async def chat_stream(self, messages: list, temperature: float = 0.7) -> AsyncIterator[str]:
         """Streaming call yielding text deltas (for low first-token latency)."""
-        body = {"model": self.model, "messages": messages, "temperature": temperature, "stream": True}
+        body = {"model": self.model, "messages": messages, "temperature": temperature, "stream": True,
+                "reasoning": self._reasoning_body()}
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream("POST", f"{self.base_url}/chat/completions",
                                      headers=self._headers(), json=body) as r:

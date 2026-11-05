@@ -20,8 +20,17 @@ from pipecat.processors.frame_processor import FrameProcessor
 
 
 def _reasoning_body() -> dict:
-    """OpenRouter reasoning params: exclude thinking from output, optional effort."""
+    """OpenRouter reasoning params for the voice path.
+
+    REASONING_ENABLED=0 (default) turns thinking OFF entirely via
+    reasoning.enabled=false — nemotron's thinking otherwise leaks deliberation
+    into the spoken content mid-tool-loop ("Now we need to double-check..."),
+    and disabling it also cuts response time ~3-4x. exclude=true additionally
+    strips any reasoning tokens that still appear.
+    """
     body: dict = {}
+    if not Config.REASONING_ENABLED:
+        body["enabled"] = False
     if Config.REASONING_EXCLUDE:
         body["exclude"] = True
     if Config.REASONING_EFFORT:
@@ -181,7 +190,7 @@ class VoicePipelineAgent:
                 "reply is spoken word-for-word, so output ONLY the final answer sentence(s), "
                 "never 'Wait', 'Hmm', or deliberation about what to say. Never "
                 "publish anything to GitHub unless the user explicitly approves "
-                "in this conversation."
+                "in this conversation. Detailed thinking: off."
             ),
         }
 

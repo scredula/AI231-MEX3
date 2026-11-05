@@ -84,6 +84,7 @@ class Config:
     # content. OpenRouter's reasoning.exclude moves it into a separate field so
     # it never gets spoken. REASONING_EFFORT optionally tunes how hard the model
     # thinks (low|medium|high, or 0-100 on some providers; empty = omit).
+    REASONING_ENABLED = _env("REASONING_ENABLED", "0") == "1"
     REASONING_EXCLUDE = _env("REASONING_EXCLUDE", "1") == "1"
     REASONING_EFFORT = _env("REASONING_EFFORT", "").strip().lower()
 
