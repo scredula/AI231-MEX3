@@ -21,7 +21,7 @@ if [ ! -f "$CONF" ]; then
 context.modules = [
   {   name = libpipewire-module-echo-cancel
       args = {
-        aec.args = { webrtc = {} }
+        aec.args = { webrtc = { echo_suppression_level = 2 } }
         source.props = {
           node.name   = "echo_cancel_source"
           node.description = "Echo-Cancel Source"
