@@ -62,7 +62,7 @@ class Config:
     # Echo gate: while the bot is speaking, drop mic audio so the speaker output
     # isn't transcribed back as user speech (half-duplex; disables barge-in).
     # Set to 0 when using headphones.
-    MIC_GATE_DURING_TTS = _env("MIC_GATE_DURING_TTS", "1") == "1"
+    MIC_GATE_DURING_TTS = _env("MIC_GATE_DURING_TTS", "0") == "1"
     MIC_GATE_TAIL_SECS = float(_env("MIC_GATE_TAIL_SECS", "0.6"))
 
     # Echo detector (correlation): keeps the mic OPEN (barge-in works) and
