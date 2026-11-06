@@ -94,11 +94,11 @@ es.onerror=()=>{dot.className='dot err';statusEl.innerHTML='<span class=\"dot er
 const seen=new Set();let lastUserKey='';let typingEl=null;
 function now(){return new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 function ts(){let d=document.createElement('div');d.className='time';d.textContent=now();feed.appendChild(d);}
-function bubble(cls,text,key){key=key||cls+':'+text;if(seen.has(key))return;seen.add(key);
+function bubble(cls,text,key){key=key||cls+':'+text;if(seen.has(key))return null;seen.add(key);
  if(typingEl){typingEl.remove();typingEl=null;}
  const r=document.createElement('div');r.className='row '+cls;
  const b=document.createElement('div');b.className='bubble'+(cls==='bot'||cls==='me'?'':' '+cls);
- b.textContent=text;r.appendChild(b);feed.appendChild(r);feed.scrollTop=feed.scrollHeight;}
+ b.textContent=text;r.appendChild(b);feed.appendChild(r);feed.scrollTop=feed.scrollHeight;return b;}
 function setTyping(on){if(on&&!typingEl){typingEl=document.createElement('div');typingEl.className='typing';
  typingEl.textContent='agent is working…';feed.appendChild(typingEl);}
  if(!on&&typingEl){typingEl.remove();typingEl=null;}}
@@ -173,7 +173,20 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
  switch(ev.type){
   case 'speech_start':break;
   case 'speech_end':window._speech[ev.turn]={speech_ms:ev.speech_ms,t_ms:ev.t_ms};break;
-  case 'transcript':{ts();bubble('me',ev.text,'u:'+ev.turn+':'+ev.text);state('listening done');
+  case 'transcript':{ts();
+   // Deepgram endpointing / turn analysis can split ONE spoken utterance into
+   // several final transcripts -> several bubbles. Merge consecutive user
+   // transcripts into one bubble when the agent hasn't replied in between.
+   const last=window._lastMe;
+   const merge=last&&!window._botSpoke&&last.el&&document.body.contains(last.el)
+     &&ev.turn!==last.turn&&(ev.t_ms-last.t_ms)<3000;
+   const key='u:'+ev.turn+':'+ev.text;
+   let el;
+   if(merge){last.el.textContent=(last.el.textContent?last.el.textContent+' ':'')+ev.text;
+    seen.add(key);window._lastMe={turn:last.turn,t_ms:ev.t_ms,el:last.el};}
+   else{el=bubble('me',ev.text,key);window._lastMe={turn:ev.turn,t_ms:ev.t_ms,el:el};}
+   window._botSpoke=false;
+   state('listening done');
    const r=turnRoot(ev,ev.text);window._roots.set(ev.turn,r);window._curKids=r.querySelector('.kids');
    const sp=window._speech[ev.turn];
    if(sp&&sp.speech_ms!=null){const stt=ev.t_ms-sp.t_ms;
@@ -189,6 +202,7 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
     live.innerHTML='<div class=\"bubble\" id=\"liveb\"></div>';feed.appendChild(live);window._live=live.querySelector('#liveb');}
    window._live.textContent+=ev.delta;feed.scrollTop=feed.scrollHeight;break;
   case 'bot_speech_start':
+   window._botSpoke=true;
    if(window._live){window._live.removeAttribute('id');window._live=null;}
    {const r=rootOf(ev.turn);
     const lts=ev.latencies&&ev.latencies.llm_request_to_bot_speech!=null?msT(ev.latencies.llm_request_to_bot_speech*1000):null;
