@@ -1,0 +1,110 @@
+{
+  "overall_wer_pct": 7.5,
+  "total_errors": 6,
+  "total_words": 80,
+  "asr_model": "nova-3",
+  "tts_model": "aura-2-thalia-en",
+  "note": "TTS->ASR round trip on synthetic speech (clean channel)",
+  "runs": [
+    {
+      "i": 1,
+      "reference": "What time is it in New York?",
+      "transcript": "What time is it in New York?",
+      "wer": 0.0,
+      "errors": 0,
+      "words": 7,
+      "tts_ms": 1241,
+      "wall_ms": 2390
+    },
+    {
+      "i": 2,
+      "reference": "Tell me the weather in Manila tomorrow.",
+      "transcript": "Tell me the weather in Manoa tomorrow.",
+      "wer": 14.3,
+      "errors": 1,
+      "words": 7,
+      "tts_ms": 2201,
+      "wall_ms": 2875
+    },
+    {
+      "i": 3,
+      "reference": "Build me a small portfolio website.",
+      "transcript": "Build me a small portfolio website.",
+      "wer": 0.0,
+      "errors": 0,
+      "words": 6,
+      "tts_ms": 2361,
+      "wall_ms": 3265
+    },
+    {
+      "i": 4,
+      "reference": "Search for the latest college football scores.",
+      "transcript": "Search for the latest college football scores.",
+      "wer": 0.0,
+      "errors": 0,
+      "words": 7,
+      "tts_ms": 2841,
+      "wall_ms": 3156
+    },
+    {
+      "i": 5,
+      "reference": "Set a reminder for five minutes to check the oven.",
+      "transcript": "Set a reminder for five minutes to check the oven.",
+      "wer": 0.0,
+      "errors": 0,
+      "words": 10,
+      "tts_ms": 2601,
+      "wall_ms": 2750
+    },
+    {
+      "i": 6,
+      "reference": "How many CPU cores does this machine have?",
+      "transcript": "How many CPU cores does this machine have?",
+      "wer": 30.0,
+      "errors": 3,
+      "words": 10,
+      "tts_ms": 2881,
+      "wall_ms": 2890
+    },
+    {
+      "i": 7,
+      "reference": "Send a message to my Telegram saying hello.",
+      "transcript": "Send a message to my telegram saying hello.",
+      "wer": 0.0,
+      "errors": 0,
+      "words": 8,
+      "tts_ms": 2521,
+      "wall_ms": 2859
+    },
+    {
+      "i": 8,
+      "reference": "Cancel my background task please.",
+      "transcript": "Cancel my background task, please.",
+      "wer": 0.0,
+      "errors": 0,
+      "words": 5,
+      "tts_ms": 2081,
+      "wall_ms": 3108
+    },
+    {
+      "i": 9,
+      "reference": "The Gators host Oklahoma this Saturday at seven forty five PM.",
+      "transcript": "The Gators host Oklahoma this Saturday at seven forty five PM.",
+      "wer": 16.7,
+      "errors": 2,
+      "words": 12,
+      "tts_ms": 4681,
+      "wall_ms": 3844
+    },
+    {
+      "i": 10,
+      "reference": "Read me the notes I saved earlier today.",
+      "transcript": "Read me the notes I saved earlier today.",
+      "wer": 0.0,
+      "errors": 0,
+      "words": 8,
+      "tts_ms": 2281,
+      "wall_ms": 2827
+    }
+  ]
+}
