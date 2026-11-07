@@ -6,6 +6,7 @@ frames. pipecat serializes TTS, so the next bot_speech_start after a completed
 speech turn belongs to that turn (FIFO commit)."""
 import json
 import statistics
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -13,7 +14,10 @@ BASE = "http://127.0.0.1:8900"
 
 
 def main() -> None:
-    events = json.loads(urllib.request.urlopen(f"{BASE}/api/events", timeout=15).read())["events"]
+    if len(sys.argv) > 1:            # local dump mode: file with {"events": [...]}
+        events = json.loads(open(sys.argv[1], encoding="utf-8").read())["events"]
+    else:
+        events = json.loads(urllib.request.urlopen(f"{BASE}/api/events", timeout=15).read())["events"]
     pending, turns = [], []
     done = set()
     for ev in events:
