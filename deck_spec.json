@@ -1,0 +1,591 @@
+{
+ "slide_size": "16:9",
+ "slides": [
+  {
+   "layout": "title",
+   "title": "Full-Duplex Voice Agent on a Raspberry Pi 5",
+   "subtitle": "Machine Exercise \u2014 AI231-MEX3 \u00b7 Sonny Redula \u00b7 github.com/scredula/AI231-MEX3",
+   "notes": "Voice agent built and deployed on a Raspberry Pi 5. Full code and docs in the public repo."
+  },
+  {
+   "layout": "blank",
+   "title": "1 \u00b7 System Diagram",
+   "shapes": [
+    {
+     "type": "rectangle",
+     "left": 0.35,
+     "top": 1.25,
+     "width": 8.75,
+     "height": 3.35,
+     "fill": "EAF0FA",
+     "text": "",
+     "text_color": "1F2937"
+    },
+    {
+     "type": "rounded_rectangle",
+     "left": 0.5,
+     "top": 1.32,
+     "width": 3.2,
+     "height": 0.35,
+     "fill": "2F5597",
+     "text": "Raspberry Pi 5 \u2014 on-device",
+     "text_color": "FFFFFF"
+    },
+    {
+     "type": "rounded_rectangle",
+     "left": 0.55,
+     "top": 1.85,
+     "width": 1.15,
+     "height": 1.05,
+     "fill": "FFFFFF",
+     "text": "Mic\n(JOUNIVO USB)",
+     "text_color": "1F2937"
+    },
+    {
+     "type": "right_arrow",
+     "left": 1.72,
+     "top": 2.2,
+     "width": 0.21,
+     "height": 0.35,
+     "fill": "8496B0"
+    },
+    {
+     "type": "rounded_rectangle",
+     "left": 1.95,
+     "top": 1.85,
+     "width": 1.15,
+     "height": 1.05,
+     "fill": "FFFFFF",
+     "text": "VAD\nSilero on-device",
+     "text_color": "1F2937"
+    },
+    {
+     "type": "right_arrow",
+     "left": 3.12,
+     "top": 2.2,
+     "width": 0.21,
+     "height": 0.35,
+     "fill": "8496B0"
+    },
+    {
+     "type": "rounded_rectangle",
+     "left": 3.35,
+     "top": 1.85,
+     "width": 1.15,
+     "height": 1.05,
+     "fill": "FFFFFF",
+     "text": "ASR\nDeepgram\nnova-3",
+     "text_color": "1F2937"
+    },
+    {
+     "type": "right_arrow",
+     "left": 4.52,
+     "top": 2.2,
+     "width": 0.21,
+     "height": 0.35,
+     "fill": "8496B0"
+    },
+    {
+     "type": "rounded_rectangle",
+     "left": 4.75,
+     "top": 1.85,
+     "width": 1.15,
+     "height": 1.05,
+     "fill": "FFFFFF",
+     "text": "Agent loop\npipecat +\nMCP tools",
+     "text_color": "1F2937"
+    },
+    {
+     "type": "right_arrow",
+     "left": 5.92,
+     "top": 2.2,
+     "width": 0.21,
+     "height": 0.35,
+     "fill": "8496B0"
+    },
+    {
+     "type": "rounded_rectangle",
+     "left": 6.15,
+     "top": 1.85,
+     "width": 1.15,
+     "height": 1.05,
+     "fill": "FFFFFF",
+     "text": "TTS\nDeepgram",
+     "text_color": "1F2937"
+    },
+    {
+     "type": "right_arrow",
+     "left": 7.32,
+     "top": 2.2,
+     "width": 0.21,
+     "height": 0.35,
+     "fill": "8496B0"
+    },
+    {
+     "type": "rounded_rectangle",
+     "left": 7.55,
+     "top": 1.85,
+     "width": 1.15,
+     "height": 1.05,
+     "fill": "FFFFFF",
+     "text": "Speaker\n(out)",
+     "text_color": "1F2937"
+    },
+    {
+     "type": "rounded_rectangle",
+     "left": 0.55,
+     "top": 3.15,
+     "width": 8.15,
+     "height": 1.0,
+     "fill": "D6E4F0",
+     "text": "MCP servers (built by us, running on the RPi):\nasr-mcp \u00b7 tts-mcp \u00b7 task-mcp \u00b7 tools-mcp\nfiles \u00b7 commands \u00b7 time \u00b7 weather \u00b7 system stats \u00b7 reminders \u00b7 notes \u00b7 telegram",
+     "text_color": "1F2937"
+    },
+    {
+     "type": "rounded_rectangle",
+     "left": 9.4,
+     "top": 1.85,
+     "width": 3.5,
+     "height": 1.6,
+     "fill": "FCE8D6",
+     "text": "Cloud API\nOpenRouter\nnvidia/nemotron-3-ultra-550B\n(thinking disabled)",
+     "text_color": "1F2937"
+    },
+    {
+     "type": "right_arrow",
+     "left": 9.05,
+     "top": 2.35,
+     "width": 0.3,
+     "height": 0.5,
+     "fill": "C55A11"
+    },
+    {
+     "type": "rounded_rectangle",
+     "left": 9.4,
+     "top": 3.7,
+     "width": 3.5,
+     "height": 0.9,
+     "fill": "FFFFFF",
+     "text": "Boundary: audio + VAD + MCP servers on-device;\nLLM inference in the cloud",
+     "text_color": "1F2937"
+    },
+    {
+     "type": "rectangle",
+     "left": 0.35,
+     "top": 5.35,
+     "width": 12.55,
+     "height": 0.85,
+     "fill": "FDE8E8",
+     "text": "Barge-in: speech detected \u2192 cancel TTS playback + stop the LLM stream \u2192 listen (mic always open; PipeWire WebRTC AEC removes TTS echo)",
+     "text_color": "9C1B1B"
+    }
+   ],
+   "notes": "One diagram: audio path, MCP servers, cloud boundary, barge-in."
+  },
+  {
+   "layout": "title_content",
+   "title": "1b \u00b7 Audio path & barge-in behavior",
+   "bullets": [
+    "Local audio transport keeps the microphone open during playback (full-duplex)",
+    "VAD: Silero on-device @16 kHz \u2014 confidence 0.75, start 0.3 s, stop 0.8 s",
+    "Turn end: Local Smart-Turn v3 (ONNX) + 0.8 s stop window",
+    "Echo: PipeWire module-echo-cancel (WebRTC AEC, suppression level 2) \u2014 TTS plays through the AEC sink, mic reads the AEC source",
+    "Second layer: in-process echo detector \u2014 cross-correlation + spectral-envelope vote against the played TTS audio",
+    "Barge-in: user speech \u2192 cancel TTS playback, stop the LLM stream, listen immediately",
+    "All stage timings recorded on one monotonic clock and streamed to the live dashboard"
+   ],
+   "notes": "Emphasize: mic never muted; AEC + detector keep self-hearing out."
+  },
+  {
+   "layout": "title_content",
+   "title": "2 \u00b7 System Prompt (v1) \u2014 versioned in repo",
+   "bullets": [
+    {
+     "text": "prompts/system_prompt_v1.md \u2014 versioned, in the repo",
+     "bold": true
+    },
+    {
+     "text": "\"You are a friendly assistant running on a Raspberry Pi 5. Keep spoken answers short (1-3 sentences)...\"",
+     "level": 1,
+     "italic": true
+    },
+    {
+     "text": "Use MCP tools: get_time, search_web, get_weather, system_stats, reminders, notes, telegram",
+     "level": 1
+    },
+    {
+     "text": "\"Never read a tool's raw output aloud \u2014 work results into a natural sentence\"",
+     "level": 1
+    },
+    {
+     "text": "\"Think silently... output ONLY the final answer sentence(s)\" + 'Detailed thinking: off.'",
+     "level": 1
+    },
+    {
+     "text": "\"Never publish anything to GitHub unless the user explicitly approves in this conversation\"",
+     "level": 1
+    },
+    {
+     "text": "Model: nvidia/nemotron-3-ultra-550b-a55b:free via OpenRouter \u2014 thinking disabled (reasoning.enabled=false)",
+     "level": 1
+    }
+   ],
+   "notes": "v1 changelog: thinking disabled after TTS leak; approval gating for publishing."
+  },
+  {
+   "layout": "two_content",
+   "title": "3 \u00b7 Context Engineering",
+   "bullets": [
+    {
+     "text": "GOES IN (per turn)",
+     "bold": true
+    },
+    {
+     "text": "System prompt + persona (v1)",
+     "level": 1
+    },
+    {
+     "text": "ASR partials/finals (rolling)",
+     "level": 1
+    },
+    {
+     "text": "VAD turn events",
+     "level": 1
+    },
+    {
+     "text": "MCP tool results (time, weather, search, files, stats)",
+     "level": 1
+    },
+    {
+     "text": "Notes + reminders (persistent JSON stores)",
+     "level": 1
+    },
+    {
+     "text": "MANAGED",
+     "bold": true
+    },
+    {
+     "text": "pipecat LLMContext: rolling window, trims old turns",
+     "level": 1
+    },
+    {
+     "text": "Stable prefix = system prompt (TTFT cache-friendly)",
+     "level": 1
+    },
+    {
+     "text": "State machine: idle \u2192 listen \u2192 think \u2192 speak",
+     "level": 1
+    },
+    {
+     "text": "Barge-in: stale audio dropped, context trimmed",
+     "level": 1
+    },
+    {
+     "text": "Every LLM request logged to the dashboard (size + content)",
+     "level": 1
+    }
+   ]
+  },
+  {
+   "layout": "title_only",
+   "title": "4 \u00b7 MCP Services (all servers built by us, running on the RPi)",
+   "tables": [
+    {
+     "left": 0.4,
+     "top": 1.4,
+     "width": 12.5,
+     "height": 4.4,
+     "rows": [
+      [
+       "Component",
+       "MCP server / transport",
+       "Tools",
+       "Model",
+       "Served where / notes"
+      ],
+      [
+       "ASR",
+       "mcp_servers/asr_server.py \u00b7 stdio + HTTP :8931",
+       "transcribe(audio) \u2192 text",
+       "Deepgram nova-3",
+       "Cloud API; agent uses pipecat streaming, MCP for tools"
+      ],
+      [
+       "TTS",
+       "mcp_servers/tts_server.py \u00b7 stdio + HTTP :8932",
+       "speak(text) \u2192 audio",
+       "Deepgram Aura",
+       "Cloud API; streaming chunks, cancel on barge-in"
+      ],
+      [
+       "LLM",
+       "harness MCP client (pipecat function calling)",
+       "tools / function-calling",
+       "nemotron-3-ultra-550B via OpenRouter",
+       "Commercial API; streaming tokens, thinking disabled"
+      ],
+      [
+       "VAD",
+       "in-process (pipecat Silero)",
+       "detect_speech(frames)",
+       "Silero VAD",
+       "RPi on-device, 16 kHz mono"
+      ],
+      [
+       "Task",
+       "mcp_servers/task_server.py \u00b7 :8933",
+       "task_status, task_list, task_cancel",
+       "n/a",
+       "RPi server; JSON task store"
+      ],
+      [
+       "Tools",
+       "mcp_servers/tools_server.py \u00b7 stdio + :8934",
+       "files, commands, time(tz), weather, system_stats, reminders, notes, telegram",
+       "n/a / Open-Meteo",
+       "RPi server; workspace-confined, command allowlist"
+      ]
+     ]
+    }
+   ],
+   "notes": "All four MCP servers are ours; tools_server also exposes time/weather/stats/reminders/notes/telegram."
+  },
+  {
+   "layout": "title_content",
+   "title": "5 \u00b7 Evaluation & Benchmark \u2014 method",
+   "bullets": [
+    "One clock: monotonic timestamps on every stage; JSON + CSV per run",
+    "Chain: VAD end \u2192 ASR final \u2192 LLM first token \u2192 TTS first audio \u2192 speaker",
+    "E2E = speaker \u2212 VAD end; barge-in = playback-stop \u2212 speech start",
+    "8 phrases \u00d7 3 runs = 24 text-injected turns (automated via dashboard)",
+    "6 human-spoken turns captured for the voice-side stages",
+    "All runs on the deployed RPi 5 agent over Wi-Fi LAN",
+    "benchmark/remote_bench.py \u00b7 benchmark/voice_reconstruct.py \u00b7 benchmark/wer_test.py"
+   ],
+   "notes": "Everything automated from the live dashboard event log."
+  },
+  {
+   "layout": "title_only",
+   "title": "5 \u00b7 Results \u2014 latency & accuracy (RPi 5, Wi-Fi LAN, 2026-11-05)",
+   "tables": [
+    {
+     "left": 0.4,
+     "top": 1.35,
+     "width": 12.5,
+     "height": 3.9,
+     "rows": [
+      [
+       "Metric",
+       "Definition",
+       "Mean",
+       "p95"
+      ],
+      [
+       "LLM TTFT",
+       "transcript \u2192 first token",
+       "764 ms",
+       "2 435 ms"
+      ],
+      [
+       "TTS TTFB",
+       "text \u2192 first audio chunk",
+       "396 ms",
+       "588 ms"
+      ],
+      [
+       "Total (text \u2192 speech)",
+       "injected text \u2192 answer audio",
+       "1 160 ms",
+       "2 773 ms"
+      ],
+      [
+       "ASR final",
+       "end of speech \u2192 transcript",
+       "eager: ready before turn end",
+       "\u2014"
+      ],
+      [
+       "E2E (voice)",
+       "end of speech \u2192 answer audio",
+       "2 902 ms",
+       "6 017 ms"
+      ],
+      [
+       "WER",
+       "TTS\u2192ASR round trip, 10 phrases",
+       "7.5% (6/80)",
+       "\u2014"
+      ]
+     ]
+    }
+   ],
+   "bullets": [
+    {
+     "text": "Environment: Raspberry Pi 5 \u00b7 8 GB \u00b7 Debian 13 \u00b7 Python 3.13 \u00b7 pipecat 1.14 \u00b7 nemotron-3-ultra-550b:free (thinking off) \u00b7 Deepgram nova-3 \u00b7 Wi-Fi LAN \u00b7 2026-11-05",
+     "size": 12
+    }
+   ],
+   "notes": "24 automated turns + 6 human-spoken turns. Thinking disabled made turns ~4x faster."
+  },
+  {
+   "layout": "blank",
+   "title": "5 \u00b7 Latency & WER charts",
+   "charts": [
+    {
+     "type": "bar",
+     "left": 0.4,
+     "top": 1.3,
+     "width": 6.2,
+     "height": 5.2,
+     "title": "Stage latency (ms) \u2014 mean vs p95",
+     "categories": [
+      "LLM TTFT",
+      "TTS TTFB",
+      "Total text\u2192speech",
+      "Voice E2E"
+     ],
+     "series": {
+      "mean": [
+       764,
+       396,
+       1160,
+       2902
+      ],
+      "p95": [
+       2435,
+       588,
+       2773,
+       6017
+      ]
+     }
+    },
+    {
+     "type": "bar",
+     "left": 6.9,
+     "top": 1.3,
+     "width": 6.0,
+     "height": 5.2,
+     "title": "WER per phrase (%) \u2014 TTS\u2192ASR round trip",
+     "categories": [
+      "P1",
+      "P2",
+      "P3",
+      "P4",
+      "P5",
+      "P6",
+      "P7",
+      "P8",
+      "P9",
+      "P10"
+     ],
+     "series": {
+      "WER %": [
+       0,
+       14.3,
+       0,
+       0,
+       0,
+       30.0,
+       0,
+       0,
+       16.7,
+       0
+      ]
+     }
+    }
+   ],
+   "notes": "WER spikes are acronyms (CPU), proper nouns (Manila) and spoken-number formats \u2014 known ASR challenges."
+  },
+  {
+   "layout": "title_content",
+   "title": "6 \u00b7 Demo (2-3 min, live on the RPi)",
+   "bullets": [
+    "1. Walk up and just SPEAK \u2014 no push-to-talk: \"What time is it in New York?\"",
+    "2. Natural follow-up while it answers \u2014 barge-in cuts playback instantly",
+    "3. Live MCP tool call: \"What's the weather in Manila?\" (Open-Meteo)",
+    "4. Background agent: \"Build me a small portfolio website\" \u2192 task id \u2192 spoken progress announcements",
+    "5. Ask for task status while it runs \u2014 agent stays conversational",
+    "6. Dashboard on a laptop: per-stage latency chips, tool calls, activity timeline",
+    "7. Recovery: disconnect/reconnect network mid-chat \u2014 agent recovers gracefully"
+   ]
+  },
+  {
+   "layout": "title_only",
+   "title": "Challenges \u2192 Fixes \u2192 Proof",
+   "tables": [
+    {
+     "left": 0.4,
+     "top": 1.3,
+     "width": 12.5,
+     "height": 4.6,
+     "rows": [
+      [
+       "Challenge",
+       "Fix",
+       "Proof it worked"
+      ],
+      [
+       "Agent heard its own TTS and answered itself (loops)",
+       "Root cause chain: wrong pipecat frame class + ALSA bypassing PipeWire; fixed routing, added PipeWire WebRTC AEC (suppression 2) + correlation/spectral echo detector",
+       "Echo decisions logged live; ghost turns: 3-4 per response \u2192 0"
+      ],
+      [
+       "Chain-of-thought leaked into spoken answers mid-tool-loop",
+       "Disabled thinking (reasoning.enabled=false) + 'Detailed thinking: off' prompt + dashboard text guard",
+       "Tool-result turn: 3.5 s \u2192 0.9 s; no narration since"
+      ],
+      [
+       "Tool results stuck 'IN_PROGRESS' forever",
+       "pipecat direct functions must deliver via result_callback \u2014 fixed all 16 tools",
+       "All tools return values live (time, weather, search, files\u2026)"
+      ],
+      [
+       "Mic muted during TTS killed barge-in",
+       "Replaced the mute-gate with AEC + echo detector \u2014 mic always open",
+       "Barge-in works; interruption latency recorded on the dashboard"
+      ]
+     ]
+    }
+   ],
+   "notes": "Each row: challenge, engineering fix, and the measurement that proves it."
+  },
+  {
+   "layout": "title_content",
+   "title": "References & Repository",
+   "bullets": [
+    {
+     "text": "Repository: github.com/scredula/AI231-MEX3 (public)",
+     "bold": true,
+     "link": "https://github.com/scredula/AI231-MEX3"
+    },
+    {
+     "text": "MCP: modelcontextprotocol.io",
+     "link": "https://modelcontextprotocol.io"
+    },
+    {
+     "text": "Pipecat (voice harness): docs.pipecat.ai",
+     "link": "https://docs.pipecat.ai"
+    },
+    {
+     "text": "OpenRouter (LLM API): openrouter.ai",
+     "link": "https://openrouter.ai"
+    },
+    {
+     "text": "Deepgram ASR/TTS: developers.deepgram.com",
+     "link": "https://developers.deepgram.com"
+    },
+    {
+     "text": "PipeWire echo cancellation: docs.pipewire.org",
+     "link": "https://docs.pipewire.org"
+    },
+    {
+     "text": "Pi coding agent (background tasks): pi.dev",
+     "link": "https://pi.dev"
+    },
+    {
+     "text": "Repo artifacts: prompts/system_prompt_v1.md \u00b7 benchmark/results/* \u00b7 docs/demo.md \u00b7 docs/mcp.md"
+    }
+   ]
+  }
+ ]
+}
