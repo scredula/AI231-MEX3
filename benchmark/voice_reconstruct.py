@@ -32,9 +32,11 @@ def main() -> None:
         elif t == "transcript" and "t_transcript" not in cur:
             cur["t_transcript"] = ev["t_ms"]
             cur["text"] = ev.get("text", "")[:80]
-        elif t == "bot_speech_start" and "t_end" in cur and "t_transcript" in cur:
+        elif t == "bot_speech_start" and len(pending) > 0:
             item = pending.pop(0)
             st = item["st"]
+            if "t_end" not in st or "t_transcript" not in st:
+                continue  # abandoned/silent turn — skip to the next pending one
             rec = {"turn": item["turn"],
                    "asr_final_ms": st["t_transcript"] - st["t_end"],
                    "e2e_ms": ev["t_ms"] - st["t_end"],
