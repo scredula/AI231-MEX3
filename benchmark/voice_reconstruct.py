@@ -1,8 +1,11 @@
 """One-shot: reconstruct voice-side latencies from the dashboard event history
-(no live collection needed). Run on the Pi; writes voice_latency.json."""
+(no live collection needed). Run on the Pi; writes voice_latency.json.
+
+NOTE: the bot's ANSWER frames carry a different turn id than the user's SPEECH
+frames. pipecat serializes TTS, so the next bot_speech_start after a completed
+speech turn belongs to that turn (FIFO commit)."""
 import json
 import statistics
-import sys
 import urllib.request
 from pathlib import Path
 
@@ -11,33 +14,36 @@ BASE = "http://127.0.0.1:8900"
 
 def main() -> None:
     events = json.loads(urllib.request.urlopen(f"{BASE}/api/events", timeout=15).read())["events"]
-    state, turns = {}, []
+    pending, turns = [], []
+    done = set()
     for ev in events:
         t, turn = ev["type"], ev.get("turn")
-        if turn is None:
+        if t == "speech_start" and turn is not None and turn not in done:
+            pending.append({"turn": turn, "st": {}})
+            done.add(turn)
             continue
-        st = state.setdefault(turn, {})
-        if t == "speech_start":
-            st["t_start"] = ev["t_ms"]
-        elif t == "speech_end":
-            st["t_end"] = ev["t_ms"]
+        if not pending:
+            continue
+        cur = pending[-1]["st"]      # events for the CURRENT speech turn
+        if t == "speech_end" and "t_end" not in cur:
+            cur["t_end"] = ev["t_ms"]
             if ev.get("speech_ms") is not None:
-                st["speech_ms"] = ev["speech_ms"]
-        elif t == "transcript":
-            st["t_transcript"] = ev["t_ms"]
-            st["text"] = ev.get("text", "")[:80]
-        elif t == "bot_speech_start" and "t_end" in st and "t_transcript" in st:
-            if "spoken" not in st:      # first answer only
-                st["spoken"] = True
-                rec = {"turn": turn,
-                       "asr_final_ms": st["t_transcript"] - st["t_end"],
-                       "e2e_ms": ev["t_ms"] - st["t_end"],
-                       "speech_ms": st.get("speech_ms"),
-                       "text": st.get("text", "")}
-                if rec["asr_final_ms"] >= 0 and rec["e2e_ms"] >= 0:
-                    turns.append(rec)
-                    print(f"turn {turn}: asr {rec['asr_final_ms']}ms, e2e {rec['e2e_ms']}ms, "
-                          f"speech {rec['speech_ms']}ms, \"{rec['text']}\"")
+                cur["speech_ms"] = ev["speech_ms"]
+        elif t == "transcript" and "t_transcript" not in cur:
+            cur["t_transcript"] = ev["t_ms"]
+            cur["text"] = ev.get("text", "")[:80]
+        elif t == "bot_speech_start" and "t_end" in cur and "t_transcript" in cur:
+            item = pending.pop(0)
+            st = item["st"]
+            rec = {"turn": item["turn"],
+                   "asr_final_ms": st["t_transcript"] - st["t_end"],
+                   "e2e_ms": ev["t_ms"] - st["t_end"],
+                   "speech_ms": st.get("speech_ms"),
+                   "text": st.get("text", "")}
+            if rec["asr_final_ms"] >= 0 and rec["e2e_ms"] >= 0:
+                turns.append(rec)
+                print(f"turn {rec['turn']}: asr {rec['asr_final_ms']}ms, e2e {rec['e2e_ms']}ms, "
+                      f"speech {rec['speech_ms']}ms, \"{rec['text']}\"")
 
     def stats(vals):
         vals = sorted(vals)
