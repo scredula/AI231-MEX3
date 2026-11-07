@@ -125,3 +125,28 @@ ECHO_DETECTOR=0
 The software echo detector (`agent/echo_detector.py`, `ECHO_DETECTOR=1`) is a
 fallback for speaker setups without OS AEC — it holds mic audio during
 echo-risk windows and cross-correlates it against the played TTS audio.
+
+
+## Spotify playback (Premium account)
+
+Voice control of Spotify: search + play, pause/resume, skip, volume, queue,
+now-playing — via a custom MCP server (`mcp_servers/spotify_server.py`) and
+direct voice tools, backed by the Spotify Web API (OAuth refresh flow).
+
+**Native playback on the Pi**: `librespot` (built from source on the Pi, runs as
+a systemd user service `librespot`) makes the Pi a Spotify Connect speaker named
+**AI231-Pi**. Its output routes through the PipeWire echo-cancel sink, so the
+AEC also cancels music from the microphone. Unit file: `deploy/librespot.service`.
+
+Setup (one time):
+1. Spotify app registration at developer.spotify.com/dashboard (redirect URI
+   `http://127.0.0.1:8888/callback`), keys in `.env`
+2. `python scripts/spotify_auth.py` — one-time browser login (token cache:
+   `.spotify_cache`, copy to the Pi)
+3. On the Pi: install librespot to `~/.local/bin`, copy
+   `deploy/librespot.service` to `~/.config/systemd/user/`,
+   `systemctl --user enable --now librespot`
+
+Voice commands: *play <song/artist> [on the Pi]* · *pause the music* ·
+*resume* · *next/previous track* · *volume 50* · *what's playing* ·
+*play it on the Pi / on my phone*

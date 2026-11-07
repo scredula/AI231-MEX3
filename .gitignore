@@ -16,3 +16,4 @@ data/notes.json
 data/reminders.json
 
 .spotify_cache
+~$*.pptx

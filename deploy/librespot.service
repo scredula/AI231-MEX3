@@ -1,0 +1,13 @@
+[Unit]
+Description=librespot (Spotify Connect player for AI231)
+Wants=pipewire.service
+After=pipewire.service network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/librespot --name AI231-Pi --device default --cache %h/.cache/librespot --initial-volume 80
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
