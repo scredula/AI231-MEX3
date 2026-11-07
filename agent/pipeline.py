@@ -307,16 +307,35 @@ class VoicePipelineAgent:
                 return
             await params.result_callback(result)
 
-        async def play_music(params: FunctionCallParams, query: str, device: str = "") -> None:
-            """Search Spotify and play a song, artist or album.
+        async def play_music(params: FunctionCallParams, query: str, kind: str = "track",
+                             device: str = "") -> None:
+            """Search Spotify and play a song, artist, album or playlist.
+
+            Playing an artist, album or playlist queues the whole collection,
+            so 'next' and 'previous' work naturally afterwards. Choose kind
+            from the user's words: 'play my favorite playlist' or 'play <name>
+            playlist' -> kind='playlist'; 'play <name> album' -> kind='album';
+            'play songs by <artist>' or 'play <artist>' -> kind='artist';
+            a specific song title -> kind='track'.
 
             Args:
-                query: Song, artist or album to play, e.g. 'Bohemian Rhapsody'.
+                query: Song, artist, album or playlist to play, e.g. 'Bohemian Rhapsody'.
+                kind: One of 'track', 'album', 'artist', 'playlist'.
                 device: Spotify device hint like 'pi' or 'phone' (empty = current).
             """
             from services import spotify_client as spc
+            ql = (query or "").lower().strip()
+            if kind == "track":
+                for k in ("playlist", "album"):
+                    if ql.endswith(k):
+                        query = query.strip()[: -len(k)].strip(" \"'on the-")
+                        kind = k
+                        break
             try:
-                result = spc.search_and_play(query, device or None)
+                if kind in ("album", "artist", "playlist"):
+                    result = spc.play_context(query, kind, device or None)
+                else:
+                    result = spc.search_and_play(query, device or None)
             except spc.SpotifyError as e:
                 await params.result_callback(f"couldn't play that: {e}")
                 return

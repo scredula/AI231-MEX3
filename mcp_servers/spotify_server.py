@@ -17,10 +17,16 @@ mcp = FastMCP("spotify")
 
 
 @mcp.tool()
-def spotify_search_play(query: str, device: str = "") -> str:
-    """Search Spotify and play the best track match. device: optional Spotify
-    Connect device name hint, e.g. 'pi' or 'phone' (empty = current/first)."""
+def spotify_search_play(query: str, kind: str = "track", device: str = "") -> str:
+    """Search Spotify and play a song, artist, album or playlist.
+
+    kind: 'track' (default), 'album', 'artist' or 'playlist'. Album/artist/
+    playlist contexts queue the whole collection so skip/previous work.
+    device: optional Spotify Connect device name hint, e.g. 'pi' or 'phone'
+    (empty = current/first)."""
     try:
+        if kind in ("album", "artist", "playlist"):
+            return spc.play_context(query, kind, device or None)
         return spc.search_and_play(query, device or None)
     except spc.SpotifyError as e:
         raise ValueError(str(e))
