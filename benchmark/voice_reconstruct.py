@@ -46,7 +46,13 @@ def main() -> None:
                            "e2e_ms": ev["t_ms"] - st["t_end"],
                            "speech_ms": st.get("speech_ms"),
                            "text": st.get("text", "")}
-                    if rec["asr_final_ms"] >= 0 and rec["e2e_ms"] >= 0:
+                    # ASR final measured from the estimated AUDIO end: the VAD's
+                    # speech_end includes ~stop_secs of trailing silence, while
+                    # Deepgram finals arrive eagerly (often before turn close).
+                    audio_end = (st.get("t_start") or st["t_end"]) + (st.get("speech_ms") or 0)
+                    rec["asr_final_ms"] = st["t_transcript"] - audio_end
+                    rec["e2e_ms"] = ev["t_ms"] - st["t_end"]
+                    if rec["e2e_ms"] >= 0:
                         turns.append(rec)
                         print(f"turn {rec['turn']}: asr {rec['asr_final_ms']}ms, "
                               f"e2e {rec['e2e_ms']}ms, speech {rec['speech_ms']}ms, "

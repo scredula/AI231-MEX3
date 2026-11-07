@@ -1,0 +1,73 @@
+{
+  "summary": {
+    "asr_final_ms": {
+      "n": 6,
+      "mean": -4384,
+      "median": -2894,
+      "p95": -2583,
+      "min": -11685,
+      "max": -2583
+    },
+    "e2e_speech_to_audio_ms": {
+      "n": 6,
+      "mean": 2902,
+      "median": 1976,
+      "p95": 6017,
+      "min": 1118,
+      "max": 6017
+    },
+    "speech_durations_ms": {
+      "n": 6,
+      "mean": 2966,
+      "median": 2268,
+      "p95": 6281,
+      "min": 2029,
+      "max": 6281
+    },
+    "note": "human-spoken phrases; VAD end -> transcript -> answer audio"
+  },
+  "turns": [
+    {
+      "turn": 2,
+      "asr_final_ms": -2744,
+      "e2e_ms": 6017,
+      "speech_ms": 2029,
+      "text": "What time is it in Manila?"
+    },
+    {
+      "turn": 4,
+      "asr_final_ms": -3511,
+      "e2e_ms": 2397,
+      "speech_ms": 2886,
+      "text": "Tell me a fun fact about octopuses."
+    },
+    {
+      "turn": 6,
+      "asr_final_ms": -11685,
+      "e2e_ms": 1130,
+      "speech_ms": 6281,
+      "text": "Which is why they usually"
+    },
+    {
+      "turn": 8,
+      "asr_final_ms": -2583,
+      "e2e_ms": 5196,
+      "speech_ms": 2063,
+      "text": "How's the weather in Manila?"
+    },
+    {
+      "turn": 10,
+      "asr_final_ms": -3045,
+      "e2e_ms": 1554,
+      "speech_ms": 2427,
+      "text": "What is the capital of Australia?"
+    },
+    {
+      "turn": 12,
+      "asr_final_ms": -2736,
+      "e2e_ms": 1118,
+      "speech_ms": 2108,
+      "text": "Who wrote Romeo and Juliet?"
+    }
+  ]
+}
