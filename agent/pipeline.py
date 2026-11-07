@@ -307,6 +307,72 @@ class VoicePipelineAgent:
                 return
             await params.result_callback(result)
 
+        async def play_music(params: FunctionCallParams, query: str, device: str = "") -> None:
+            """Search Spotify and play a song, artist or album.
+
+            Args:
+                query: Song, artist or album to play, e.g. 'Bohemian Rhapsody'.
+                device: Spotify device hint like 'pi' or 'phone' (empty = current).
+            """
+            from services import spotify_client as spc
+            try:
+                result = spc.search_and_play(query, device or None)
+            except spc.SpotifyError as e:
+                await params.result_callback(f"couldn't play that: {e}")
+                return
+            await params.result_callback(result)
+
+        async def pause_music(params: FunctionCallParams) -> None:
+            """Pause Spotify playback."""
+            from services import spotify_client as spc
+            try:
+                await params.result_callback(spc.pause())
+            except spc.SpotifyError as e:
+                await params.result_callback(f"couldn't pause: {e}")
+
+        async def resume_music(params: FunctionCallParams, device: str = "") -> None:
+            """Resume Spotify playback."""
+            from services import spotify_client as spc
+            try:
+                await params.result_callback(spc.resume(device or None))
+            except spc.SpotifyError as e:
+                await params.result_callback(f"couldn't resume: {e}")
+
+        async def skip_track(params: FunctionCallParams, backwards: str = "no") -> None:
+            """Skip to the next (or previous) Spotify track.
+
+            Args:
+                backwards: 'yes' to go back to the previous track.
+            """
+            from services import spotify_client as spc
+            try:
+                if str(backwards).lower().startswith(("y", "prev", "back")):
+                    await params.result_callback(spc.previous_track())
+                else:
+                    await params.result_callback(spc.next_track())
+            except spc.SpotifyError as e:
+                await params.result_callback(f"couldn't skip: {e}")
+
+        async def set_music_volume(params: FunctionCallParams, level: int) -> None:
+            """Set the Spotify volume (0-100).
+
+            Args:
+                level: Volume percentage 0 to 100.
+            """
+            from services import spotify_client as spc
+            try:
+                await params.result_callback(spc.set_volume(level))
+            except spc.SpotifyError as e:
+                await params.result_callback(f"couldn't set volume: {e}")
+
+        async def now_playing(params: FunctionCallParams) -> None:
+            """Report what Spotify is playing right now."""
+            from services import spotify_client as spc
+            try:
+                await params.result_callback(spc.now_playing())
+            except spc.SpotifyError as e:
+                await params.result_callback(f"couldn't check: {e}")
+
         async def search_web(params: FunctionCallParams, query: str) -> None:
             """Search the web for current information (news, prices, facts).
 
@@ -385,6 +451,8 @@ class VoicePipelineAgent:
                                               get_time, search_web, get_weather, create_file,
                                               set_reminder, list_reminders, add_note, read_notes,
                                               system_stats, send_telegram,
+                                              play_music, pause_music, resume_music,
+                                              skip_track, set_music_volume, now_playing,
                                               edit_file, read_file, run_command])
         aggregators = LLMContextAggregatorPair(context)
 

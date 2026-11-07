@@ -1,0 +1,227 @@
+"""Spotify control via the Web API (spotipy) — shared by the voice tools and the
+spotify MCP server.
+
+Auth: one-time Authorization Code flow (scripts/spotify_auth.py) caches tokens
+in .spotify_cache (repo root, gitignored); spotipy auto-refreshes afterwards.
+
+NOTE on audio: the Web API CONTROLS playback but carries no audio. Play the
+sound on a Spotify Connect device — e.g. the Pi itself via librespot/spotifyd,
+or any device logged into the account (phone, laptop, speakers).
+"""
+import logging
+import os
+import time
+from pathlib import Path
+
+from agent.config import Config  # noqa: E402,F401  (loads .env into os.environ)
+
+log = logging.getLogger("spotify")
+
+CACHE_PATH = Path(os.environ.get("SPOTIFY_CACHE",
+                                 Path(__file__).resolve().parent.parent / ".spotify_cache"))
+
+SCOPES = ("user-read-playback-state user-modify-playback-state "
+          "user-read-currently-playing streaming user-read-private")
+
+_client = None
+
+
+def _sp():
+    """Lazy spotipy client; raises SpotifyError with a helpful message if not authed."""
+    global _client
+    if _client is not None:
+        return _client
+    try:
+        import spotipy
+        from spotipy.oauth2 import SpotifyOAuth
+    except ImportError as e:
+        raise SpotifyError(f"spotipy not installed: {e}")
+    cid = os.environ.get("SPOTIFY_CLIENT_ID")
+    sec = os.environ.get("SPOTIFY_CLIENT_SECRET")
+    redirect = os.environ.get("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
+    if not cid or not sec:
+        raise SpotifyError("SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET missing in .env")
+    if not CACHE_PATH.exists():
+        raise SpotifyError("not authorized yet — run scripts/spotify_auth.py once (browser login)")
+    _client = spotipy.Spotify(auth_manager=SpotifyOAuth(
+        client_id=cid, client_secret=sec, redirect_uri=redirect,
+        scope=SCOPES, cache_path=str(CACHE_PATH),
+        open_browser=False, requests_timeout=10))
+    return _client
+
+
+class SpotifyError(Exception):
+    pass
+
+
+def _handle(fn):
+    """Run a spotipy call; translate common failures into friendly text."""
+    try:
+        return fn()
+    except SpotifyError:
+        raise
+    except Exception as e:
+        msg = str(e)
+        if "NO_ACTIVE_DEVICE" in msg or "device not found" in msg.lower():
+            raise SpotifyError("no active Spotify device — say 'play it on the Pi' or open Spotify somewhere first")
+        if "RESTRICTED" in msg or "403" in msg:
+            raise SpotifyError("Spotify rejected the request (check premium account and app settings)")
+        raise SpotifyError(msg[:200])
+
+
+# ---- playback state helpers ----
+
+def _find_device(name_hint: str) -> dict | None:
+    """Find a Connect device by fuzzy name (e.g. 'pi', 'phone')."""
+    sp = _sp()
+    devices = (_handle(lambda: sp.devices()) or {}).get("devices", [])
+    hint = (name_hint or "").strip().lower()
+    if not hint:
+        return None
+    for d in devices:
+        if hint in d["name"].lower():
+            return d
+    for d in devices:                      # also match type words
+        if hint in (d.get("type") or "").lower():
+            return d
+    return None
+
+
+def _ensure_device(name_hint: str | None) -> dict | None:
+    """Transfer playback to the hinted device if one is given; otherwise return
+    the current active device (or None)."""
+    sp = _sp()
+    if name_hint:
+        dev = _find_device(name_hint)
+        if dev is None:
+            names = ", ".join(d["name"] for d in (_handle(lambda: sp.devices()).get("devices", [])))
+            raise SpotifyError(f"no device matching {name_hint!r} — available: {names or 'none'}")
+        _handle(lambda: sp.transfer_playback(dev["id"], force_play=True))
+        time.sleep(1.0)                    # Connect handover settles
+        return dev
+    cur = _handle(lambda: sp.current_playback())
+    if cur and cur.get("device"):
+        return cur["device"]
+    # nothing active: pick the Pi (AI231) if present, else the first device
+    dev = _find_device("ai231") or _find_device("pi")
+    if dev is None:
+        devices = _handle(lambda: sp.devices()).get("devices", [])
+        dev = devices[0] if devices else None
+    if dev:
+        _handle(lambda: sp.transfer_playback(dev["id"], force_play=False))
+        time.sleep(1.0)
+    return dev
+
+
+# ---- public API (shared by voice tools + MCP server) ----
+
+def search_and_play(query: str, device_hint: str | None = None) -> str:
+    """Search tracks for `query` and start playback of the best match."""
+    sp = _sp()
+    res = _handle(lambda: sp.search(q=query, type="track", limit=5))
+    tracks = res.get("tracks", {}).get("items", [])
+    if not tracks:
+        # fall back to artist search and play top track
+        res = _handle(lambda: sp.search(q=query, type="artist", limit=1))
+        artists = res.get("artists", {}).get("items", [])
+        if not artists:
+            return f"No Spotify results for {query!r}."
+        artist = artists[0]
+        top = _handle(lambda: sp.artist_top_tracks(artist["id"]))["tracks"]
+        if not top:
+            return f"No playable tracks for {query!r}."
+        tracks = top
+    track = tracks[0]
+    dev = _ensure_device(device_hint)
+    _handle(lambda: sp.start_playback(device_id=dev["id"] if dev else None,
+                                      uris=[track["uri"]]))
+    artists = ", ".join(a["name"] for a in track["artists"])
+    return (f"Playing {track['name']} by {artists} on "
+            f"{(dev or {}).get('name', 'Spotify')}.")
+
+
+def play_context(query: str, kind: str = "album", device_hint: str | None = None) -> str:
+    """Play an album/artist/playlist by name."""
+    sp = _sp()
+    kind = kind if kind in ("album", "artist", "playlist") else "album"
+    res = _handle(lambda: sp.search(q=query, type=kind, limit=1))
+    items = res.get(kind + "s", {}).get("items", [])
+    if not items:
+        return f"No {kind} results for {query!r}."
+    item = items[0]
+    dev = _ensure_device(device_hint)
+    uri = item["uri"] if kind != "artist" else None
+    if kind == "artist":
+        _handle(lambda: sp.start_playback(device_id=dev["id"] if dev else None,
+                                          context_uri=item["uri"]))
+    else:
+        _handle(lambda: sp.start_playback(device_id=dev["id"] if dev else None,
+                                          context_uri=item["uri"]))
+    return f"Playing {kind} {item['name']} on {(dev or {}).get('name', 'Spotify')}."
+
+
+def pause() -> str:
+    _handle(lambda: _sp().pause_playback())
+    return "Paused."
+
+
+def resume(device_hint: str | None = None) -> str:
+    _ensure_device(device_hint)
+    _handle(lambda: _sp().start_playback())
+    return "Resumed."
+
+
+def next_track() -> str:
+    _handle(lambda: _sp().next_track())
+    time.sleep(0.6)
+    cp = _handle(lambda: _sp().current_playback())
+    name = ((cp or {}).get("item") or {}).get("name", "next track")
+    return f"Next: {name}."
+
+
+def previous_track() -> str:
+    _handle(lambda: _sp().previous_track())
+    return "Previous track."
+
+
+def set_volume(level: int) -> str:
+    level = max(0, min(100, int(level)))
+    _handle(lambda: _sp().volume(level))
+    return f"Volume {level}%."
+
+
+def now_playing() -> str:
+    cp = _handle(lambda: _sp().current_playback())
+    if not cp or not cp.get("item"):
+        return "Nothing is playing right now."
+    item = cp["item"]
+    artists = ", ".join(a["name"] for a in item.get("artists", []))
+    state = "paused" if cp.get("is_playing") is False else "playing"
+    return (f"{state}: {item['name']} by {artists} on "
+            f"{cp['device']['name']} at {cp.get('progress_ms', 0) // 1000} seconds.")
+
+
+def list_devices() -> str:
+    devices = _handle(lambda: _sp().devices()).get("devices", [])
+    if not devices:
+        return "No Spotify Connect devices visible — open Spotify somewhere first."
+    return "; ".join(f"{d['name']} ({d['type']}){' ACTIVE' if d.get('is_active') else ''}"
+                     for d in devices)
+
+
+def add_to_queue(query: str) -> str:
+    sp = _sp()
+    res = _handle(lambda: sp.search(q=query, type="track", limit=1))
+    tracks = res.get("tracks", {}).get("items", [])
+    if not tracks:
+        return f"No track found for {query!r}."
+    _handle(lambda: sp.add_to_queue(tracks[0]["uri"]))
+    return f"Queued {tracks[0]['name']}."
+
+
+def auth_status() -> str:
+    try:
+        _sp()
+        return "Spotify authorized."
+    except SpotifyError as e:
+        return f"Spotify NOT authorized: {e}"

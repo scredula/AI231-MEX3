@@ -14,3 +14,5 @@ node_modules/
 # agent-local state (reminders/notes are runtime data)
 data/notes.json
 data/reminders.json
+
+.spotify_cache
