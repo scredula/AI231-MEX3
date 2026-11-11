@@ -174,6 +174,9 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
   case 'speech_start':break;
   case 'speech_end':window._speech[ev.turn]={speech_ms:ev.speech_ms,t_ms:ev.t_ms};break;
   case 'transcript':{ts();
+   // A new user utterance closes any still-open reply bubble from a previous
+   // turn, so the next reply always starts a fresh bubble.
+   if(window._live){window._live.removeAttribute('id');window._live=null;}
    // Deepgram endpointing / turn analysis can split ONE spoken utterance into
    // several final transcripts -> several bubbles. Merge consecutive user
    // transcripts into one bubble when the agent hasn't replied in between.
@@ -198,8 +201,8 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
    kid(rootOf(ev.turn),'🧠','LLM think',think,
     null,think?('model: '+(ev.model||'?')+'\\nthink time: '+think):null);break;}
   case 'llm_delta':setTyping(false);state('replying');
-   if(!window._live){const live=document.createElement('div');live.className='row bot';
-    live.innerHTML='<div class=\"bubble\" id=\"liveb\"></div>';feed.appendChild(live);window._live=live.querySelector('#liveb');}
+   if(!window._live||window._liveTurn!==ev.turn){const live=document.createElement('div');live.className='row bot';
+    live.innerHTML='<div class=\"bubble\" id=\"liveb\"></div>';feed.appendChild(live);window._live=live.querySelector('#liveb');window._liveTurn=ev.turn;}
    window._live.textContent+=ev.delta;feed.scrollTop=feed.scrollHeight;break;
   case 'bot_speech_start':
    window._botSpoke=true;
@@ -216,7 +219,8 @@ es.onmessage=(e)=>{const ev=JSON.parse(e.data);
   case 'turn_end':{const r=window._roots.get(ev.turn);
    if(r){const tot=document.getElementById('tot-'+ev.turn);
     if(tot&&tot.classList.contains('run')){tot.className='chip unk';tot.textContent='NO RESPONSE';}
-    window._curKids=null;}break;}
+    window._curKids=null;}
+   if(window._live){window._live.removeAttribute('id');window._live=null;}break;}
   case 'tool_running':setTyping(true);state('running '+ev.name);evtInfo(ev,null);break;
   case 'tool_result':evtInfo(ev,ev.ok);break;
   case 'tool_calls_started':break;
