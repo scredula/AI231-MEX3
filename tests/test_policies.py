@@ -28,6 +28,6 @@ def test_path_confinement(policy):
     inside = policy.check_path("site/index.html")
     assert str(inside).startswith(str(ws))
     with pytest.raises(PolicyViolation):
-        policy.check_path("C:/Windows/system32/config")
+        policy.check_path("/etc/passwd")  # absolute on both POSIX and Windows
     with pytest.raises(PolicyViolation):
         policy.check_path("../../etc/passwd")

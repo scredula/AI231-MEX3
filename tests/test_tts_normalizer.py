@@ -17,8 +17,10 @@ def _clean(text):
 def _run_through(frame):
     norm = TTSTextNormalizer()
     seen = []
-    norm.push_frame = lambda f, d: seen.append(f)  # capture output
-    asyncio.get_event_loop().run_until_complete(norm.process_frame(frame, None))
+    async def fake_push(f, d):
+        seen.append(f)
+    norm.push_frame = fake_push  # capture output
+    asyncio.run(norm.process_frame(frame, None))
     return seen[0]
 
 
