@@ -89,6 +89,8 @@ class TurnTracker:
         self.t_llm_first_token = None
         self.llm_text = ""
         self.t_bot_speech = None
+        self.t_prev_bot_speech = None
+        self.t_interrupt = None
         self.tts_contexts_done = 0
         self.interrupted = False
 
@@ -111,6 +113,9 @@ class TurnTracker:
         self.t_user_speech = time.monotonic()
         self.t_speech_end = self.t_transcript = self.t_llm_request = None
         self.t_llm_first_token = self.t_bot_speech = None
+        # keep the bot-speech time of the turn being interrupted: on barge-in,
+        # UserStartedSpeakingFrame (this call) arrives BEFORE InterruptionFrame
+        self.t_prev_bot_speech = self.t_bot_speech
         self.transcript_text = self.llm_text = ""
         self.tts_contexts_done = 0
         self.interrupted = False
@@ -178,11 +183,13 @@ class DashboardObserver:
             self._emit({"type": "transcript", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed, "text": t.transcript_text})
         elif isinstance(frame, InterruptionFrame):
-            if t.t_bot_speech:
+            ts_bot = t.t_bot_speech or getattr(t, "t_prev_bot_speech", None)
+            if ts_bot:
                 t.interrupted = True
+                t.t_interrupt = now
                 self._emit({"type": "interruption", "turn": t.turn_id, "t_ms": tms,
-                            "elapsed_ms": elapsed,
-                            "interrupt_latency": self.tracker.latencies()["llm_request_to_bot_speech"]})
+                            "interrupt_ms": int((now - t.t_user_speech) * 1000),
+                            "playing_ms": int((now - ts_bot) * 1000)})
         elif isinstance(frame, FunctionCallsStartedFrame):
             calls = [{"name": getattr(c, "function_name", "?"),
                       "arguments": str(getattr(c, "arguments", ""))} for c in getattr(frame, "function_calls", [])]
@@ -231,6 +238,10 @@ class DashboardObserver:
                 self.echo_gate.on_bot_speech_end()
             if getattr(self, "echo_detector", None):
                 self.echo_detector._state.last_playback_end = time.monotonic()
+            if t.interrupted and t.t_user_speech is not None:
+                # barge-in complete: user speech onset -> playback actually stopped
+                self._emit({"type": "barge_in_done", "turn": t.turn_id, "t_ms": tms,
+                            "barge_ms": int((now - t.t_user_speech) * 1000)})
             t.end_turn()
         elif isinstance(frame, TTSSpeakFrame):
             if getattr(self, "echo_detector", None) and frame.text:
