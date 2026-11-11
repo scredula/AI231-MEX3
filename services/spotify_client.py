@@ -359,6 +359,31 @@ def _obj_id(uri: str) -> str:
     return uri.rsplit(":", 1)[-1]
 
 
+def _tracks_from_queue() -> list:
+    """Playlist listings can be 403-restricted for dev-mode apps; the player
+    queue endpoint isn't. Build the skip-around list from what will play next."""
+    sp = _sp()
+
+    def _row(t, idx):
+        return {
+            "uri": t.get("uri"),
+            "name": t.get("name"),
+            "artists": ", ".join(a.get("name", "") for a in t.get("artists", [] or [])),
+            "duration_ms": t.get("duration_ms") or 0,
+            "position": idx,
+        }
+
+    res = _handle(lambda: sp.queue()) or {}
+    rows = []
+    for t in (res.get("currently_playing") or []):
+        if t and t.get("uri"):
+            rows.append(_row(t, len(rows) + 1))
+    for t in (res.get("queue") or []):
+        if t and t.get("uri"):
+            rows.append(_row(t, len(rows) + 1))
+    return rows
+
+
 def _tracks_of_context(uri: str, limit: int) -> list:
     """Fetch track dicts for a playlist or album context URI."""
     sp = _sp()
@@ -374,15 +399,19 @@ def _tracks_of_context(uri: str, limit: int) -> list:
         }
 
     if uri.startswith("spotify:playlist:"):
-        res = _handle(lambda: sp.playlist_tracks(_obj_id(uri), limit=limit))
-        idx = 0
-        for it in res.get("items", []):
-            t = (it or {}).get("track") or {}
-            if not t or t.get("is_local") or not t.get("uri"):
-                continue
-            idx += 1
-            tracks.append(_row(t, idx))
-        ctype = "playlist"
+        try:
+            res = _handle(lambda: sp.playlist_tracks(_obj_id(uri), limit=limit))
+            idx = 0
+            for it in res.get("items", []):
+                t = (it or {}).get("track") or {}
+                if not t or t.get("is_local") or not t.get("uri"):
+                    continue
+                idx += 1
+                tracks.append(_row(t, idx))
+            ctype = "playlist"
+        except Exception:
+            tracks = _tracks_from_queue()[:limit]  # 403 fallback for dev-mode apps
+            ctype = "playlist"
     elif uri.startswith("spotify:album:"):
         res = _handle(lambda: sp.album_tracks(_obj_id(uri), limit=limit))
         for i, t in enumerate(res.get("items", []), start=1):
