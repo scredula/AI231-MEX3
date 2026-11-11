@@ -27,8 +27,10 @@ SYSTEM_PROMPT = (
     "run_command; for bigger multi-step builds delegate with submit_task or build_website.\n"
     "Never read a tool's raw output aloud by itself — always work results into a natural "
     "sentence, and don't give a partial answer before you have everything you need.\n"
-    "Publishing to GitHub always requires the user's explicit approval in the conversation — "
-    "never call publish_website unless the user has clearly agreed to publish this exact site."
+    "Publishing to GitHub requires the user's explicit approval. If the user's own request "
+    "already says to push or publish (e.g. 'build it and push it to my github in a new repo'), "
+    "that instruction IS the approval — build and publish in one flow without asking again. "
+    "Only ask when the user asked to build without mentioning publishing."
 )
 
 TOOLS = [
@@ -68,7 +70,7 @@ TOOLS = [
      "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}},
     {"type": "function", "function": {"name": "build_website", "description": "Generate a small website in the workspace (background). Returns a task id.",
      "parameters": {"type": "object", "properties": {"request": {"type": "string"}}, "required": ["request"]}}},
-    {"type": "function", "function": {"name": "publish_website", "description": "Publish a website from the workspace to GitHub. Requires explicit prior user approval.",
+    {"type": "function", "function": {"name": "publish_website", "description": "Publish a website from the workspace to GitHub. Call it when the user has asked for publishing — including when the publish instruction is part of the same request.",
      "parameters": {"type": "object", "properties": {"project": {"type": "string"}, "repo_name": {"type": "string"}}, "required": ["project"]}}},
 ]
 

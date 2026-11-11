@@ -228,8 +228,11 @@ class VoicePipelineAgent:
                 "never narrate, recap, or second-guess your reasoning out loud — your entire "
                 "reply is spoken word-for-word, so output ONLY the final answer sentence(s), "
                 "never 'Wait', 'Hmm', or deliberation about what to say. Never "
-                "publish anything to GitHub unless the user explicitly approves "
-                "in this conversation. Your reply is spoken aloud by text-to-speech, "
+                "publish anything to GitHub unless the user explicitly approves. If the "
+                "user's own request already says to push or publish — for example 'build "
+                "it and push it to my github in a new repo' — that instruction IS the "
+                "approval: build and publish in one flow without asking again. Your reply "
+                "is spoken aloud by text-to-speech, "
                 "so never use markdown or formatting symbols — no **, #, -, backticks, "
                 "URLs or lists; write plain prose only. Detailed thinking: off."
             ),
