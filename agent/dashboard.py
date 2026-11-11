@@ -96,6 +96,18 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
 #mDrop .row .n{color:#e6e6e6;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #mDrop .row .s{color:#79839a;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #mDrop .none{color:#79839a;font-size:12px;padding:8px 10px}
+/* playing-context track list */
+#mCtxTitle{color:#79839a;font-size:10px;text-transform:uppercase;letter-spacing:.08em;text-align:center}
+#mList{width:100%;max-height:260px;overflow-y:auto;border:1px solid #2a2f3c;border-radius:8px;background:#12151d}
+#mList .crow{display:flex;gap:8px;align-items:center;padding:6px 10px;cursor:pointer}
+#mList .crow:hover{background:#1c2130}
+#mList .crow.cur{background:#1d2b45}
+#mList .crow.cur .cn{color:#9ecbff}
+#mList .crow .idx{width:18px;text-align:right;color:#5a6070;font-size:11px;flex:none}
+#mList .crow .cn{flex:1;min-width:0;color:#e6e6e6;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mList .crow .ca{color:#79839a;font-size:11px;flex:none;max-width:40%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mList .crow .cd{color:#5a6070;font-size:11px;flex:none}
+#mList .empty{color:#79839a;font-size:12px;padding:8px 10px;text-align:center}
 #mErr{min-height:0}
 @media (max-width:900px){main{flex-direction:column}#conv,#act{flex:1}}
 </style></head>
@@ -133,6 +145,8 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
     <div id="mDrop"></div>
    </div>
    <div id="mMsg"></div>
+   <div id="mCtxTitle"></div>
+   <div id="mList"></div>
   </div>
  </section>
 </main>
@@ -311,7 +325,11 @@ function mApply(p){
  const pos=p.progress_ms||0;
  if(!mSeeking){$m('mSeek').disabled=!mDurMs;$m('mSeek').value=mDurMs?Math.round(pos/mDurMs*1000):0;}
  $m('mPos').textContent=fmtMs(pos);$m('mDur').textContent=fmtMs(mDurMs);
- if(!mVolDrag&&p.volume!=null)$m('mVolR').value=p.volume;}
+ if(!mVolDrag&&p.volume!=null)$m('mVolR').value=p.volume;
+ if(p.context_uri!==window._mCtxUri){
+  window._mCtxUri=p.context_uri||null;
+  mContextPoll();
+ }}
 async function mPoll(){
  if($m('music').style.display==='none')return;
  const d=await mApi('/api/now_playing');
@@ -384,6 +402,35 @@ $m('mQ').addEventListener('keydown',e=>{
  if(e.key==='Escape'){$m('mDrop').style.display='none';}});
 document.addEventListener('click',e=>{
  if(!e.target.closest('#mSearch'))$m('mDrop').style.display='none';});
+/* ---- playing-context track list ---- */
+let mCurUri=null;
+async function mContextPoll(){
+ const d=await mApi('/api/context');
+ const list=$m('mList');
+ if(!d.ok||!d.type||!d.tracks.length){
+  list.style.display='none';$m('mCtxTitle').textContent='';mCurUri=null;return;}
+ list.style.display='block';
+ $m('mCtxTitle').textContent=d.type==='playlist'?'Playlist tracks':'Album tracks';
+ list.innerHTML='';
+ d.tracks.forEach(x=>{
+  const r=document.createElement('div');
+  r.className='crow'+(x.uri===d.current_uri?' cur':'');
+  const i=document.createElement('span');i.className='idx';i.textContent=x.position||'';
+  const n=document.createElement('span');n.className='cn';n.textContent=x.name||'';
+  const a=document.createElement('span');a.className='ca';a.textContent=(x.artists||'').split(',')[0]||'';
+  const du=document.createElement('span');du.className='cd';du.textContent=fmtMs(x.duration_ms||0);
+  r.appendChild(i);r.appendChild(n);r.appendChild(a);r.appendChild(du);
+  r.onclick=async()=>{
+   mMsg('');
+   const resp=await mApi('/api/jump',{uri:x.uri,context_uri:d.context_uri});
+   mMsg(resp.ok?'':resp.error,!resp.ok);
+   setTimeout(mContextPoll,1000);setTimeout(mPoll,1000);
+  };
+  list.appendChild(r);
+ });
+ list.scrollTop=0;
+}
+setInterval(mContextPoll,15000);
 setInterval(mPoll,3000);
 mPoll();mLoadDevices();
 </script></body></html>"""
@@ -559,6 +606,25 @@ class DashboardServer:
                 except Exception as e:
                     return JSONResponse({"ok": False, "error": str(e)})
 
+            async def api_context(request):
+                try:
+                    res = await asyncio.to_thread(spc.context_current)
+                    return JSONResponse({"ok": True, **res})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
+            async def api_jump(request):
+                try:
+                    body = await request.json()
+                    uri = str(body.get("uri", ""))
+                    ctx = str(body.get("context_uri", "") or "")
+                    if not uri:
+                        return JSONResponse({"ok": False, "error": "missing uri"}, status_code=400)
+                    msg = await asyncio.to_thread(spc.jump_to, uri, ctx or None)
+                    return JSONResponse({"ok": True, "message": msg})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
             app = Starlette(routes=[
                 Route("/", index),
                 Route("/events", events),
@@ -573,6 +639,8 @@ class DashboardServer:
                 Route("/api/transfer", api_transfer, methods=["POST"]),
                 Route("/api/search", api_search),
                 Route("/api/play_uri", api_play_uri, methods=["POST"]),
+                Route("/api/context", api_context),
+                Route("/api/jump", api_jump, methods=["POST"]),
             ])
             config = uvicorn.Config(app, host=Config.DASHBOARD_HOST, port=self.port,
                                     log_level="warning", loop="asyncio")

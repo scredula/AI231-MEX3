@@ -270,6 +270,8 @@ def now_playing_raw() -> dict:
         "device_id": cp.get("device", {}).get("id"),
         "volume": cp.get("device", {}).get("volume_percent"),
         "shuffle": cp.get("shuffle_state"),
+        "uri": item.get("uri"),
+        "context_uri": (cp.get("context") or {}).get("uri"),
     }
 
 
@@ -345,4 +347,94 @@ def play_uri(uri: str, device_hint: str | None = None) -> str:
     _handle(lambda: sp.start_playback(device_id=dev["id"] if dev else None,
                                       uris=[uri] if uri.startswith("spotify:track") else None,
                                       context_uri=uri if not uri.startswith("spotify:track") else None))
+    return "Playing selection."
+
+
+# ---- playing-context track list (web-UI player) ----
+
+_ctx_cache: dict = {"uri": None, "ts": 0.0, "type": None, "tracks": []}
+
+
+def _obj_id(uri: str) -> str:
+    return uri.rsplit(":", 1)[-1]
+
+
+def _tracks_of_context(uri: str, limit: int) -> list:
+    """Fetch track dicts for a playlist or album context URI."""
+    sp = _sp()
+    tracks = []
+
+    def _row(t, idx):
+        return {
+            "uri": t.get("uri"),
+            "name": t.get("name"),
+            "artists": ", ".join(a.get("name", "") for a in t.get("artists", [] or [])),
+            "duration_ms": t.get("duration_ms") or 0,
+            "position": idx,
+        }
+
+    if uri.startswith("spotify:playlist:"):
+        res = _handle(lambda: sp.playlist_tracks(_obj_id(uri), limit=limit))
+        idx = 0
+        for it in res.get("items", []):
+            t = (it or {}).get("track") or {}
+            if not t or t.get("is_local") or not t.get("uri"):
+                continue
+            idx += 1
+            tracks.append(_row(t, idx))
+        ctype = "playlist"
+    elif uri.startswith("spotify:album:"):
+        res = _handle(lambda: sp.album_tracks(_obj_id(uri), limit=limit))
+        for i, t in enumerate(res.get("items", []), start=1):
+            if not t or not t.get("uri"):
+                continue
+            tracks.append(_row(t, i))
+        ctype = "album"
+    else:
+        return []
+    return tracks[:limit]
+
+
+def context_current(limit: int = 100) -> dict:
+    """Track list of whatever album/playlist is playing now, with the current
+    track's uri marked. Cached 5 min per context URI (playlists are big)."""
+    import time as _time
+    cp = _handle(lambda: _sp().current_playback())
+    if not cp or not cp.get("item"):
+        return {"type": None, "tracks": []}
+    ctx = (cp.get("context") or {}).get("uri")
+    if not ctx:
+        return {"type": None, "tracks": []}
+    now = _time.time()
+    if not (_ctx_cache["uri"] == ctx and now - _ctx_cache["ts"] < 300):
+        try:
+            tracks = _tracks_of_context(ctx, limit)
+        except Exception as e:
+            log.warning(f"context tracks fetch failed for {ctx}: {e}")
+            tracks = []
+        _ctx_cache.update(uri=ctx, ts=now,
+                          type="playlist" if ctx.startswith("spotify:playlist:")
+                          else ("album" if ctx.startswith("spotify:album:") else None),
+                          tracks=tracks)
+    return {"type": _ctx_cache["type"], "context_uri": ctx,
+            "current_uri": cp["item"].get("uri"),
+            "tracks": _ctx_cache["tracks"]}
+
+
+def jump_to(uri: str, context_uri: str | None = None) -> str:
+    """Skip straight to a track — inside its album/playlist context when given."""
+    sp = _sp()
+    cur = _handle(lambda: sp.current_playback())
+    dev_id = (cur or {}).get("device", {}).get("id")
+    if context_uri and context_uri.startswith(("spotify:album:", "spotify:playlist:")):
+        try:
+            _handle(lambda: sp.start_playback(device_id=dev_id, context_uri=context_uri,
+                                              offset={"uri": uri}))
+            return "Playing selection."
+        except Exception:
+            pass  # offset not supported for this context — play the track directly
+    if not dev_id:
+        dev = _ensure_device(None)
+        dev_id = dev["id"] if dev else None
+    _handle(lambda: sp.start_playback(device_id=dev_id, uris=[uri]))
     return "Playing selection."
