@@ -225,3 +225,47 @@ def auth_status() -> str:
         return "Spotify authorized."
     except SpotifyError as e:
         return f"Spotify NOT authorized: {e}"
+
+
+# ---- structured data (web-UI player; returns dicts, not sentences) ----
+
+def now_playing_raw() -> dict:
+    """Full playback state for the web-UI player ({} when nothing is playing)."""
+    cp = _handle(lambda: _sp().current_playback())
+    if not cp or not cp.get("item"):
+        return {"playing": False, "active": bool(cp)}
+    item = cp["item"]
+    return {
+        "playing": bool(cp.get("is_playing")),
+        "title": item.get("name"),
+        "artists": ", ".join(a.get("name", "") for a in item.get("artists", [])),
+        "album": item.get("album", {}).get("name"),
+        "art": (item.get("album", {}).get("images") or [{}])[0].get("url"),
+        "progress_ms": cp.get("progress_ms") or 0,
+        "duration_ms": item.get("duration_ms") or 0,
+        "device": cp.get("device", {}).get("name"),
+        "device_id": cp.get("device", {}).get("id"),
+        "volume": cp.get("device", {}).get("volume_percent"),
+        "shuffle": cp.get("shuffle_state"),
+    }
+
+
+def seek(position_ms: int, device_hint: str | None = None) -> str:
+    """Move playback to an absolute position (milliseconds)."""
+    dev = _ensure_device(device_hint)
+    _handle(lambda: _sp().seek_track(int(position_ms),
+                                     device_id=dev["id"] if dev else None))
+    return f"Seeked to {int(position_ms) // 1000}s."
+
+
+def list_devices_raw() -> list:
+    """Connect devices as dicts: id, name, type, active."""
+    res = _handle(lambda: _sp().devices()).get("devices", [])
+    return [{"id": d["id"], "name": d["name"], "type": d.get("type"),
+             "active": d.get("is_active", False)} for d in res]
+
+
+def transfer(device_id: str) -> str:
+    """Move playback to a specific Connect device (no forced play)."""
+    _handle(lambda: _sp().transfer_playback(device_id, force_play=False))
+    return "Playback moved."

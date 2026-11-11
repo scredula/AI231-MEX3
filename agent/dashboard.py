@@ -70,12 +70,32 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
 .composer input{flex:1;background:#12151d;border:1px solid #2a2f3c;color:#e6e6e6;border-radius:8px;padding:8px 10px;font:inherit}
 .composer button{background:#2f5fa8;border:0;color:#fff;border-radius:8px;padding:8px 16px;font:inherit}
 .composer button:disabled{opacity:.5}
+/* music player */
+#music .scroll{display:flex;flex-direction:column;gap:10px;padding:14px}
+#mArt{width:180px;height:180px;border-radius:12px;background:#1c2130;border:1px solid #2a2f3c;object-fit:cover;align-self:center}
+#mTitle{font-size:16px;font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mArtists,#mAlbum{color:#8b93a7;font-size:13px;text-align:center;margin:0}
+#mProg{width:100%}
+#mSeek{width:100%;accent-color:#4a7dd6}
+#mTimes{display:flex;justify-content:space-between;color:#6a7386;font-size:11px}
+#mCtl{display:flex;gap:16px;align-items:center;justify-content:center}
+#mCtl button{background:#1c2130;border:1px solid #2a2f3c;color:#e6e6e6;border-radius:50%;width:44px;height:44px;font-size:15px;cursor:pointer}
+#mCtl #mPlay{background:#2f5fa8;border-color:#2f5fa8;width:56px;height:56px;font-size:20px}
+#mVol{display:flex;gap:8px;align-items:center;color:#8b93a7}
+#mVol input{flex:1;accent-color:#4a7dd6}
+#mDev{background:#12151d;color:#e6e6e6;border:1px solid #2a2f3c;border-radius:8px;padding:8px;font:inherit}
+#mSearch{display:flex;gap:6px}
+#mSearch input{flex:1;background:#12151d;border:1px solid #2a2f3c;color:#e6e6e6;border-radius:8px;padding:8px 10px;font:inherit}
+#mSearch select{background:#12151d;color:#e6e6e6;border:1px solid #2a2f3c;border-radius:8px;font:inherit}
+#mSearch button{background:#2f5fa8;border:0;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer}
+#mMsg{color:#8fd694;font-size:12px;min-height:16px;text-align:center;word-break:break-word}
+#mErr{min-height:0}
 @media (max-width:900px){main{flex-direction:column}#tabs{display:flex}#conv.hide,#act.hide{display:none}#conv,#act{flex:1}}
 </style></head>
 <body>
 <header><h1>voice-agent</h1>
  <span id="status"><span class="dot" id="dot"></span>connecting…</span>
- <div id="tabs"><button data-p="conv" class="on">Chat</button><button data-p="act">Activity</button></div>
+ <div id="tabs"><button data-p="conv" class="on">Chat</button><button data-p="act">Activity</button><button data-p="music">Music</button></div>
 </header>
 <main>
  <section class="panel" id="conv"><h2>Conversation <span id="agentState"></span></h2>
@@ -83,6 +103,32 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
   <div class="composer"><input id="inp" placeholder="Type a message (voice mode: just speak)"><button id="send">Send</button></div>
  </section>
  <section class="panel hide-on-narrow" id="act"><h2>Agent activity</h2><div class="scroll" id="feed2"></div></section>
+ <section class="panel" id="music"><h2>Music player</h2>
+  <div class="scroll">
+   <div class="errline" id="mErr"></div>
+   <img id="mArt" alt="album art">
+   <div id="mTitle">Nothing playing</div>
+   <div id="mArtists"></div>
+   <div id="mAlbum"></div>
+   <div id="mProg">
+    <input id="mSeek" type="range" min="0" max="1000" value="0" disabled>
+    <div id="mTimes"><span id="mPos">0:00</span><span id="mDur">0:00</span></div>
+   </div>
+   <div id="mCtl">
+    <button id="mPrev" title="previous">⏮</button>
+    <button id="mPlay" title="play or pause">▶</button>
+    <button id="mNext" title="next">⏭</button>
+   </div>
+   <div id="mVol"><span>🔊</span><input id="mVolR" type="range" min="0" max="100" value="50"></div>
+   <select id="mDev"><option value="">device…</option></select>
+   <div id="mSearch">
+    <input id="mQ" placeholder="search and play…">
+    <select id="mKind"><option value="track">song</option><option value="album">album</option><option value="artist">artist</option><option value="playlist">playlist</option></select>
+    <button id="mGo" title="play">▶</button>
+   </div>
+   <div id="mMsg"></div>
+  </div>
+ </section>
 </main>
 <script>
 const feed=document.getElementById('feed'),feed2=document.getElementById('feed2');
@@ -159,11 +205,14 @@ function turnRoot(ev,text){
 function evtInfo(ev,ok){const pre=evtCard(ev,ev.arguments||'',ok);pre.textContent=toolDetails(ev,ok);feed2.scrollTop=feed2.scrollHeight;}
 /* tabs (mobile) */
 const tabs=document.getElementById('tabs');
-tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{
- tabs.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
- document.getElementById('conv').style.display=b.dataset.p==='conv'?'flex':'none';
- document.getElementById('act').style.display=b.dataset.p==='act'?'flex':'none';});
+const PANELS=['conv','act','music'];
+function showOnlyMobile(p){
+ PANELS.forEach(id=>{document.getElementById(id).style.display=id===p?'flex':'none';});
+ tabs.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.p===p));}
+tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{showOnlyMobile(b.dataset.p);
+ if(b.dataset.p==='music'){mPoll();mLoadDevices();}});
 if(innerWidth>900){document.getElementById('act').style.display='flex';}
+else{showOnlyMobile('conv');}
 /* agent state */
 function state(s){document.getElementById('agentState').textContent=s?'· '+s:'';}
 /* ---- events ---- */
@@ -238,6 +287,66 @@ async function send(){const text=inp.value.trim();if(!text)return;inp.value='';
   if(!r.ok)console.warn('say failed',r.status);}catch(e){console.warn(e);}
  document.getElementById('send').disabled=false;}
 document.getElementById('send').onclick=send;inp.addEventListener('keydown',e=>{if(e.key==='Enter')send();});
+/* ---- music player ---- */
+const $m=id=>document.getElementById(id);
+let mSeeking=false,mVolDrag=false,mDurMs=0;
+function fmtMs(v){v=Math.round(v/1000);if(!isFinite(v))v=0;return Math.floor(v/60)+':'+String(v%60).padStart(2,'0');}
+async function mApi(path,body){
+ try{const r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  return await r.json();}catch(err){return{ok:false,error:String(err)};}}
+function mMsg(t,bad){$m('mMsg').textContent=t||'';$m('mMsg').style.color=bad?'#ff9a8a':'#8fd694';}
+function mApply(p){
+ const empty=!p.title;
+ $m('mTitle').textContent=empty?'Nothing playing':p.title;
+ $m('mArtists').textContent=empty?'':(p.artists||'');
+ $m('mAlbum').textContent=empty?'':(p.album||'');
+ if(p.art)$m('mArt').src=p.art;
+ $m('mPlay').textContent=p.playing?'⏸':'▶';
+ mDurMs=p.duration_ms||0;
+ const pos=p.progress_ms||0;
+ if(!mSeeking){$m('mSeek').disabled=!mDurMs;$m('mSeek').value=mDurMs?Math.round(pos/mDurMs*1000):0;}
+ $m('mPos').textContent=fmtMs(pos);$m('mDur').textContent=fmtMs(mDurMs);
+ if(!mVolDrag&&p.volume!=null)$m('mVolR').value=p.volume;}
+async function mPoll(){
+ if($m('music').style.display==='none')return;
+ const d=await mApi('/api/now_playing');
+ if(!d.ok){$m('mErr').textContent='player: '+(d.error||'unavailable');return;}
+ $m('mErr').textContent='';
+ mApply(d.playing||{});}
+async function mAct(action){mMsg('');
+ const d=await mApi('/api/player',{action:action});
+ mMsg(d.ok?(d.message||''):d.error,!d.ok);setTimeout(mPoll,900);}
+$m('mPlay').onclick=()=>{mAct($m('mPlay').textContent==='⏸'?'pause':'resume');};
+$m('mNext').onclick=()=>mAct('next');
+$m('mPrev').onclick=()=>mAct('previous');
+$m('mSeek').addEventListener('input',()=>{mSeeking=true;
+ $m('mPos').textContent=fmtMs(mDurMs*$m('mSeek').value/1000);});
+$m('mSeek').addEventListener('change',async()=>{mSeeking=false;
+ const d=await mApi('/api/seek',{position_ms:Math.round(mDurMs*$m('mSeek').value/1000)});
+ mMsg(d.ok?'':d.error,!d.ok);setTimeout(mPoll,700);});
+$m('mVolR').addEventListener('input',()=>{mVolDrag=true;});
+$m('mVolR').addEventListener('change',async()=>{mVolDrag=false;
+ const d=await mApi('/api/volume',{level:+$m('mVolR').value});
+ mMsg(d.ok?(d.message||''):d.error,!d.ok);});
+async function mLoadDevices(){
+ const d=await mApi('/api/devices');
+ if(!d.ok)return;
+ const dd=$m('mDev');dd.innerHTML='';
+ if(!d.devices.length){const o=document.createElement('option');o.value='';o.text='no devices';dd.appendChild(o);return;}
+ d.devices.forEach(x=>{const o=document.createElement('option');o.value=x.id;
+  o.text=x.name+(x.active?' · active':'');dd.appendChild(o);});}
+async function mPlayQuery(){
+ const q=$m('mQ').value.trim();if(!q)return;mMsg('');
+ const d=await mApi('/api/play',{query:q,kind:$m('mKind').value});
+ mMsg(d.ok?(d.message||'Now playing.'):d.error,!d.ok);setTimeout(mPoll,1500);}
+$m('mGo').onclick=mPlayQuery;
+$m('mQ').addEventListener('keydown',e=>{if(e.key==='Enter')mPlayQuery();});
+$m('mDev').addEventListener('change',async()=>{
+ const id=$m('mDev').value;if(!id)return;
+ const d=await mApi('/api/transfer',{device_id:id});
+ mMsg(d.ok?'Playback moved.':d.error,!d.ok);setTimeout(mPoll,1200);});
+setInterval(mPoll,3000);
+mPoll();mLoadDevices();
 </script></body></html>"""
 
 
@@ -304,11 +413,103 @@ class DashboardServer:
                     return JSONResponse({"error": str(e)}, status_code=500)
                 return JSONResponse({"ok": True})
 
+            # ---- music player API (wraps services.spotify_client) ----
+            from services import spotify_client as spc
+
+            async def api_now_playing(request):
+                try:
+                    data = await asyncio.to_thread(spc.now_playing_raw)
+                    return JSONResponse({"ok": True, "playing": data})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
+            async def api_player(request):
+                try:
+                    body = await request.json()
+                except ValueError:
+                    return JSONResponse({"ok": False, "error": "invalid json"}, status_code=400)
+                action = str(body.get("action", ""))
+                device = str(body.get("device", "") or "")
+                try:
+                    if action == "pause":
+                        msg = await asyncio.to_thread(spc.pause)
+                    elif action == "resume":
+                        msg = await asyncio.to_thread(spc.resume, device or None)
+                    elif action == "next":
+                        msg = await asyncio.to_thread(spc.next_track)
+                    elif action == "previous":
+                        msg = await asyncio.to_thread(spc.previous_track)
+                    else:
+                        return JSONResponse({"ok": False, "error": f"unknown action {action!r}"}, status_code=400)
+                    return JSONResponse({"ok": True, "message": msg})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
+            async def api_volume(request):
+                try:
+                    body = await request.json()
+                    level = int(body.get("level", 50))
+                    msg = await asyncio.to_thread(spc.set_volume, level)
+                    return JSONResponse({"ok": True, "message": msg})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
+            async def api_seek(request):
+                try:
+                    body = await request.json()
+                    pos = int(body.get("position_ms", 0))
+                    device = str(body.get("device", "") or "")
+                    msg = await asyncio.to_thread(spc.seek, pos, device or None)
+                    return JSONResponse({"ok": True, "message": msg})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
+            async def api_play(request):
+                try:
+                    body = await request.json()
+                    query = str(body.get("query", "")).strip()[:300]
+                    kind = str(body.get("kind", "track") or "track")
+                    device = str(body.get("device", "") or "")
+                    if not query:
+                        return JSONResponse({"ok": False, "error": "empty query"}, status_code=400)
+                    if kind in ("album", "artist", "playlist"):
+                        msg = await asyncio.to_thread(spc.play_context, query, kind, device or None)
+                    else:
+                        msg = await asyncio.to_thread(spc.search_and_play, query, device or None)
+                    return JSONResponse({"ok": True, "message": msg})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
+            async def api_devices(request):
+                try:
+                    devs = await asyncio.to_thread(spc.list_devices_raw)
+                    return JSONResponse({"ok": True, "devices": devs})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
+            async def api_transfer(request):
+                try:
+                    body = await request.json()
+                    dev_id = str(body.get("device_id", ""))
+                    if not dev_id:
+                        return JSONResponse({"ok": False, "error": "missing device_id"}, status_code=400)
+                    msg = await asyncio.to_thread(spc.transfer, dev_id)
+                    return JSONResponse({"ok": True, "message": msg})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
             app = Starlette(routes=[
                 Route("/", index),
                 Route("/events", events),
                 Route("/api/events", history),
                 Route("/say", say, methods=["POST"]),
+                Route("/api/now_playing", api_now_playing),
+                Route("/api/player", api_player, methods=["POST"]),
+                Route("/api/volume", api_volume, methods=["POST"]),
+                Route("/api/seek", api_seek, methods=["POST"]),
+                Route("/api/play", api_play, methods=["POST"]),
+                Route("/api/devices", api_devices),
+                Route("/api/transfer", api_transfer, methods=["POST"]),
             ])
             config = uvicorn.Config(app, host=Config.DASHBOARD_HOST, port=self.port,
                                     log_level="warning", loop="asyncio")
