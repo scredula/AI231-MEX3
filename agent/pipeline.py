@@ -11,11 +11,12 @@ Flow:  mic → VAD → STT(Deepgram) → LLM(OpenRouter FAST_MODEL) → TTS(Elev
 """
 import asyncio
 import logging
+import re
 
 from agent.config import Config
 from agent.observability import DashboardObserver, EventBus
 from pipecat.frames.frames import (BotStartedSpeakingFrame, BotStoppedSpeakingFrame,
-                                   InputAudioRawFrame)
+                                   InputAudioRawFrame, TextFrame, TTSSpeakFrame)
 from pipecat.processors.frame_processor import FrameProcessor
 
 
@@ -38,6 +39,43 @@ def _reasoning_body() -> dict:
     return body
 
 log = logging.getLogger("pipeline")
+
+
+class TTSTextNormalizer(FrameProcessor):
+    """Strips markdown and symbols from LLM text before TTS so it's spoken as prose.
+
+    The LLM sometimes emits markdown (bold **, headings, bullets, links) even when
+    told not to; TTS engines read those literally ("star star"). Placed between the
+    LLM and the TTS service, it rewrites TextFrame content and TTSSpeakFrame text
+    (task announcements) in place: bold/italic/strike/code markers removed, heading
+    markers stripped, bullets removed, [text](url) -> "text", bare URLs -> domain.
+    """
+
+    _INLINE = re.compile(r"(\*\*|__|~~|`)(.+?)\1")
+    _ITALIC = re.compile(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\w)")
+    _ITALIC_UNDER = re.compile(r"(?<![\w_])_(?!\s)([^_\n]+?)(?<!\s)_(?!\w)")
+    _HEADING = re.compile(r"^\s{0,3}#{1,6}\s+", re.M)
+    _BULLET = re.compile(r"^\s{0,3}[-*+]\s+", re.M)
+    _LINK = re.compile(r"\[([^\]\n]+)\]\([^)\n]+\)")
+    _URL = re.compile(r"https?://(?:www\.)?(\S+)")
+
+    def clean(self, text: str) -> str:
+        text = self._INLINE.sub(r"\2", text)
+        text = self._ITALIC.sub(r"\1", text)
+        text = self._ITALIC_UNDER.sub(r"\1", text)
+        text = self._HEADING.sub("", text)
+        text = self._BULLET.sub("", text)
+        text = self._LINK.sub(r"\1", text)
+        text = self._URL.sub(r"\1", text)
+        return text
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TextFrame):
+            frame.text = self.clean(frame.text)
+        elif isinstance(frame, TTSSpeakFrame):
+            frame.text = self.clean(frame.text)
+        await self.push_frame(frame, direction)
 
 
 class EchoGateProcessor(FrameProcessor):
@@ -160,6 +198,7 @@ class VoicePipelineAgent:
                                    model=Config.FAST_MODEL,
                                    extra={"extra_body": {"reasoning": _reasoning_body()}} if Config.REASONING_EXCLUDE or Config.REASONING_EFFORT else {}))
         tts = self._make_tts_service(transport_sample_rate=24000)
+        tts_norm = TTSTextNormalizer()
 
         # observability: dashboard + frame observer + LLM request capture
         from agent.observability import DashboardObserver, ObservableLLMService
@@ -190,7 +229,9 @@ class VoicePipelineAgent:
                 "reply is spoken word-for-word, so output ONLY the final answer sentence(s), "
                 "never 'Wait', 'Hmm', or deliberation about what to say. Never "
                 "publish anything to GitHub unless the user explicitly approves "
-                "in this conversation. Detailed thinking: off."
+                "in this conversation. Your reply is spoken aloud by text-to-speech, "
+                "so never use markdown or formatting symbols — no **, #, -, backticks, "
+                "URLs or lists; write plain prose only. Detailed thinking: off."
             ),
         }
 
@@ -484,6 +525,7 @@ class VoicePipelineAgent:
             *( [echo_guard] if echo_guard else [] ),
             aggregators.user(),
             llm,
+            tts_norm,
             tts,
             aggregators.assistant(),
             *( [tts_tap] if tts_tap else [] ),
