@@ -59,8 +59,9 @@ def tts(text: str) -> bytes:
 
 
 def asr(wav: bytes) -> str:
+    model_q = f"model={Config.ASR_MODEL}&" if Config.ASR_MODEL else ""
     req = urllib.request.Request(
-        f"{API}/listen?model={Config.ASR_MODEL}&punctuate=true&language=en",
+        f"{API}/listen?{model_q}punctuate=true&language=en",
         data=wav, headers={"Authorization": f"Token {KEY}",
                            "Content-Type": "audio/wav"}, method="POST")
     with urllib.request.urlopen(req, timeout=30) as r:
