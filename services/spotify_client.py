@@ -375,11 +375,11 @@ def _tracks_from_queue() -> list:
 
     res = _handle(lambda: sp.queue()) or {}
     rows = []
-    for t in (res.get("currently_playing") or []):
-        if t and t.get("uri"):
-            rows.append(_row(t, len(rows) + 1))
+    cp_t = res.get("currently_playing")
+    if isinstance(cp_t, dict) and cp_t.get("uri"):
+        rows.append(_row(cp_t, len(rows) + 1))
     for t in (res.get("queue") or []):
-        if t and t.get("uri"):
+        if isinstance(t, dict) and t.get("uri"):
             rows.append(_row(t, len(rows) + 1))
     return rows
 
