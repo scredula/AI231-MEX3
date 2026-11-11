@@ -115,6 +115,15 @@ def _ensure_device(name_hint: str | None) -> dict | None:
 
 # ---- public API (shared by voice tools + MCP server) ----
 
+def _play_uris_replacing(uris: list, device_hint: str | None = None) -> dict | None:
+    """Passing a uris list to start_playback replaces the whole play sequence —
+    any stale explicit queue from a previous selection is dropped."""
+    dev = _ensure_device(device_hint)
+    _handle(lambda: _sp().start_playback(device_id=dev["id"] if dev else None,
+                                         uris=uris))
+    return dev
+
+
 def search_and_play(query: str, device_hint: str | None = None) -> str:
     """Search tracks for `query` and start playback of the best match."""
     sp = _sp()
@@ -132,24 +141,21 @@ def search_and_play(query: str, device_hint: str | None = None) -> str:
             return f"No playable tracks for {query!r}."
         tracks = top
     track = tracks[0]
-    dev = _ensure_device(device_hint)
-    _handle(lambda: sp.start_playback(device_id=dev["id"] if dev else None,
-                                      uris=[track["uri"]]))
-    # Single-track contexts have no queue: 'next' would just restart the same
-    # track and the device pauses. Queue the rest of the album so next/previous
-    # walk the collection naturally.
+    # Passing a uris list to start_playback REPLACES the whole play sequence,
+    # dropping any stale queue left over from a previous selection.
+    uris = [track["uri"]]
     try:
         album_id = track.get("album", {}).get("id")
         if album_id:
             album = _handle(lambda: sp.album_tracks(album_id, limit=50))
-            album_uris = [t["uri"] for t in album.get("items", []) if t["uri"] != track["uri"]]
-            for uri in album_uris:
-                _handle(lambda: sp.add_to_queue(uri, device_id=dev["id"] if dev else None))
+            uris += [t["uri"] for t in album.get("items", [])
+                     if t.get("uri") and t["uri"] != track["uri"]]
     except Exception as e:
-        log.warning(f"could not queue album context after single-track play: {e}")
+        log.warning(f"could not extend single-track play with album context: {e}")
+    msg_dev = _play_uris_replacing(uris, device_hint)
     artists = ", ".join(a["name"] for a in track["artists"])
     return (f"Playing {track['name']} by {artists} on "
-            f"{(dev or {}).get('name', 'Spotify')}.")
+            f"{(msg_dev or {}).get('name', 'Spotify')}.")
 
 
 def play_context(query: str, kind: str = "album", device_hint: str | None = None) -> str:
@@ -341,12 +347,43 @@ def search_raw(query: str, limit: int = 5) -> dict:
 
 
 def play_uri(uri: str, device_hint: str | None = None) -> str:
-    """Start playback of a specific URI (track, album or playlist)."""
+    """Start playback of a specific URI (track, album or playlist), always
+    replacing the play sequence so no stale queue survives."""
     sp = _sp()
+    if uri.startswith("spotify:track:"):
+        track = _handle(lambda: sp.track(uri))
+        uris = [uri]
+        album_id = (track.get("album") or {}).get("id")
+        if album_id:
+            try:
+                album = _handle(lambda: sp.album_tracks(album_id, limit=50))
+                uris += [t["uri"] for t in album.get("items", [])
+                         if t.get("uri") and t["uri"] != uri]
+            except Exception as e:
+                log.warning(f"could not extend track play with album context: {e}")
+        dev = _play_uris_replacing(uris, device_hint)
+        artists = ", ".join(a["name"] for a in track.get("artists", []))
+        return (f"Playing {track['name']} by {artists} on "
+                f"{(dev or {}).get('name', 'Spotify')}.")
+    if uri.startswith("spotify:album:"):
+        album = _handle(lambda: sp.album_tracks(_obj_id(uri), limit=50))
+        uris = [t["uri"] for t in album.get("items", []) if t.get("uri")]
+        if uris:
+            dev = _play_uris_replacing(uris, device_hint)
+            return f"Playing album on {(dev or {}).get('name', 'Spotify')}."
+    if uri.startswith("spotify:playlist:"):
+        try:
+            res = _handle(lambda: sp.playlist_tracks(_obj_id(uri), limit=100))
+            uris = [it["track"]["uri"] for it in res.get("items", [])
+                    if it and (it.get("track") or {}).get("uri")]
+            if uris:
+                dev = _play_uris_replacing(uris, device_hint)
+                return f"Playing playlist on {(dev or {}).get('name', 'Spotify')}."
+        except Exception as e:
+            log.warning(f"playlist contents not readable ({e}) — playing as context")
     dev = _ensure_device(device_hint)
     _handle(lambda: sp.start_playback(device_id=dev["id"] if dev else None,
-                                      uris=[uri] if uri.startswith("spotify:track") else None,
-                                      context_uri=uri if not uri.startswith("spotify:track") else None))
+                                      context_uri=uri))
     return "Playing selection."
 
 
@@ -359,10 +396,10 @@ def _obj_id(uri: str) -> str:
     return uri.rsplit(":", 1)[-1]
 
 
-def _tracks_from_queue() -> list:
-    """Playlist listings can be 403-restricted for dev-mode apps; the player
-    queue endpoint isn't. Build the skip-around list from what will play next."""
-    sp = _sp()
+def queue_raw() -> dict:
+    """Structured player queue for the web-UI 'Up next' list:
+    currently playing first, then queued tracks in play order."""
+    res = _handle(lambda: _sp().queue()) or {}
 
     def _row(t, idx):
         return {
@@ -373,7 +410,6 @@ def _tracks_from_queue() -> list:
             "position": idx,
         }
 
-    res = _handle(lambda: sp.queue()) or {}
     rows = []
     cp_t = res.get("currently_playing")
     if isinstance(cp_t, dict) and cp_t.get("uri"):
@@ -381,7 +417,13 @@ def _tracks_from_queue() -> list:
     for t in (res.get("queue") or []):
         if isinstance(t, dict) and t.get("uri"):
             rows.append(_row(t, len(rows) + 1))
-    return rows
+    return {"tracks": rows}
+
+
+def _tracks_from_queue() -> list:
+    """Playlist listings can be 403-restricted for dev-mode apps; the player
+    queue endpoint isn't. Build the skip-around list from what will play next."""
+    return queue_raw()["tracks"]
 
 
 def _tracks_of_context(uri: str, limit: int) -> list:
@@ -450,11 +492,22 @@ def context_current(limit: int = 100) -> dict:
             "tracks": _ctx_cache["tracks"]}
 
 
-def jump_to(uri: str, context_uri: str | None = None) -> str:
-    """Skip straight to a track — inside its album/playlist context when given."""
+def jump_to(uri: str, context_uri: str | None = None,
+            uris: list | None = None) -> str:
+    """Skip straight to a track — inside its album/playlist context when given,
+    or by replaying the remaining queue when a uris list is supplied."""
     sp = _sp()
     cur = _handle(lambda: sp.current_playback())
     dev_id = (cur or {}).get("device", {}).get("id")
+    if uris:
+        uris = [u for u in uris if u]
+        if uri in uris:
+            uris = uris[uris.index(uri):]
+        try:
+            _handle(lambda: sp.start_playback(device_id=dev_id, uris=uris))
+            return "Playing selection."
+        except Exception:
+            pass  # fall through to the context/offset path
     if context_uri and context_uri.startswith(("spotify:album:", "spotify:playlist:")):
         try:
             _handle(lambda: sp.start_playback(device_id=dev_id, context_uri=context_uri,

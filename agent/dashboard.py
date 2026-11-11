@@ -108,6 +108,17 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
 #mList .crow .ca{color:#79839a;font-size:11px;flex:none;max-width:40%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #mList .crow .cd{color:#5a6070;font-size:11px;flex:none}
 #mList .empty{color:#79839a;font-size:12px;padding:8px 10px;text-align:center}
+#mQTitle{color:#79839a;font-size:10px;text-transform:uppercase;letter-spacing:.08em;text-align:center}
+#mQList{width:100%;max-height:220px;overflow-y:auto;border:1px solid #2a2f3c;border-radius:8px;background:#12151d}
+#mQList .crow{display:flex;gap:8px;align-items:center;padding:6px 10px;cursor:pointer}
+#mQList .crow:hover{background:#1c2130}
+#mQList .crow.cur{background:#1d2b45}
+#mQList .crow.cur .cn{color:#9ecbff}
+#mQList .crow .idx{width:18px;text-align:right;color:#5a6070;font-size:11px;flex:none}
+#mQList .crow .cn{flex:1;min-width:0;color:#e6e6e6;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mQList .crow .ca{color:#79839a;font-size:11px;flex:none;max-width:40%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mQList .crow .cd{color:#5a6070;font-size:11px;flex:none}
+#mQList .empty{color:#79839a;font-size:12px;padding:8px 10px;text-align:center}
 #mErr{min-height:0}
 @media (max-width:900px){main{flex-direction:column}#conv,#act{flex:1}}
 </style></head>
@@ -147,6 +158,8 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
    <div id="mMsg"></div>
    <div id="mCtxTitle"></div>
    <div id="mList"></div>
+   <div id="mQTitle">Up next</div>
+   <div id="mQList"></div>
   </div>
  </section>
 </main>
@@ -431,6 +444,38 @@ async function mContextPoll(){
  list.scrollTop=0;
 }
 setInterval(mContextPoll,15000);
+/* ---- live queue (Up next) ---- */
+async function mQueuePoll(){
+ if($m('music').style.display==='none')return;
+ const d=await mApi('/api/queue');
+ const list=$m('mQList');
+ if(!d.ok){list.style.display='none';$m('mQTitle').textContent='';return;}
+ if(!d.tracks.length){list.style.display='none';$m('mQTitle').textContent='Up next · nothing queued';return;}
+ list.style.display='block';
+ $m('mQTitle').textContent='Up next';
+ list.innerHTML='';
+ d.tracks.forEach((x,idx)=>{
+  const r=document.createElement('div');
+  r.className='crow'+(idx===0?' cur':'');
+  const i=document.createElement('span');i.className='idx';i.textContent=idx+1;
+  const n=document.createElement('span');n.className='cn';
+  n.textContent=idx===0?('▶ '+(x.name||'')):(x.name||'');
+  const a=document.createElement('span');a.className='ca';a.textContent=(x.artists||'').split(',')[0]||'';
+  const du=document.createElement('span');du.className='cd';du.textContent=fmtMs(x.duration_ms||0);
+  r.appendChild(i);r.appendChild(n);r.appendChild(a);r.appendChild(du);
+  r.onclick=async()=>{
+   if(idx===0)return;
+   mMsg('');
+   const uris=d.tracks.slice(idx).map(t=>t.uri);
+   const resp=await mApi('/api/jump',{uri:x.uri,uris:uris});
+   mMsg(resp.ok?'':resp.error,!resp.ok);
+   setTimeout(mQueuePoll,1200);setTimeout(mPoll,1200);
+  };
+  list.appendChild(r);
+ });
+}
+setInterval(mQueuePoll,5000);
+mQueuePoll();
 setInterval(mPoll,3000);
 mPoll();mLoadDevices();
 </script></body></html>"""
@@ -618,10 +663,20 @@ class DashboardServer:
                     body = await request.json()
                     uri = str(body.get("uri", ""))
                     ctx = str(body.get("context_uri", "") or "")
+                    uris = body.get("uris") or []
                     if not uri:
                         return JSONResponse({"ok": False, "error": "missing uri"}, status_code=400)
-                    msg = await asyncio.to_thread(spc.jump_to, uri, ctx or None)
+                    msg = await asyncio.to_thread(
+                        spc.jump_to, uri, ctx or None,
+                        [str(u) for u in uris] if isinstance(uris, list) else None)
                     return JSONResponse({"ok": True, "message": msg})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
+            async def api_queue(request):
+                try:
+                    res = await asyncio.to_thread(spc.queue_raw)
+                    return JSONResponse({"ok": True, **res})
                 except Exception as e:
                     return JSONResponse({"ok": False, "error": str(e)})
 
@@ -641,6 +696,7 @@ class DashboardServer:
                 Route("/api/play_uri", api_play_uri, methods=["POST"]),
                 Route("/api/context", api_context),
                 Route("/api/jump", api_jump, methods=["POST"]),
+                Route("/api/queue", api_queue),
             ])
             config = uvicorn.Config(app, host=Config.DASHBOARD_HOST, port=self.port,
                                     log_level="warning", loop="asyncio")
