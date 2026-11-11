@@ -85,6 +85,17 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
 #mVol input{flex:1;accent-color:#4a7dd6}
 #mDev{background:#12151d;color:#e6e6e6;border:1px solid #2a2f3c;border-radius:8px;padding:8px;font:inherit}
 #mMsg{color:#8fd694;font-size:12px;min-height:16px;text-align:center;word-break:break-word}
+#mSearch{position:relative}
+#mSearch input{width:100%;background:#12151d;border:1px solid #2a2f3c;color:#e6e6e6;border-radius:8px;padding:8px 10px;font:inherit}
+#mDrop{position:absolute;top:100%;left:0;right:0;background:#161a23;border:1px solid #2a2f3c;border-radius:8px;max-height:280px;overflow-y:auto;z-index:20;display:none;box-shadow:0 6px 18px rgba(0,0,0,.5)}
+#mDrop .grp{color:#79839a;font-size:10px;text-transform:uppercase;letter-spacing:.08em;padding:6px 10px 2px}
+#mDrop .row{display:flex;gap:8px;align-items:center;padding:6px 10px;cursor:pointer}
+#mDrop .row:hover{background:#1c2130}
+#mDrop .row img{width:32px;height:32px;border-radius:4px;flex:none;background:#1c2130}
+#mDrop .row .t{flex:1;min-width:0}
+#mDrop .row .n{color:#e6e6e6;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mDrop .row .s{color:#79839a;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mDrop .none{color:#79839a;font-size:12px;padding:8px 10px}
 #mErr{min-height:0}
 @media (max-width:900px){main{flex-direction:column}#conv,#act{flex:1}}
 </style></head>
@@ -117,6 +128,10 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
    </div>
    <div id="mVol"><span>🔊</span><input id="mVolR" type="range" min="0" max="100" value="50"></div>
    <select id="mDev"><option value="">device…</option></select>
+   <div id="mSearch">
+    <input id="mQ" placeholder="search songs, albums, playlists…" autocomplete="off">
+    <div id="mDrop"></div>
+   </div>
    <div id="mMsg"></div>
   </div>
  </section>
@@ -329,6 +344,46 @@ $m('mDev').addEventListener('change',async()=>{
  const id=$m('mDev').value;if(!id)return;
  const d=await mApi('/api/transfer',{device_id:id});
  mMsg(d.ok?'Playback moved.':d.error,!d.ok);setTimeout(mPoll,1200);});
+/* ---- music search dropdown ---- */
+let mSearchT=null;
+async function mDoSearch(){
+ const q=$m('mQ').value.trim();const dd=$m('mDrop');
+ if(q.length<2){dd.style.display='none';return;}
+ const d=await mApi('/api/search?q='+encodeURIComponent(q));
+ if(!d.ok){dd.style.display='none';return;}
+ dd.innerHTML='';
+ let any=false;
+ const groups=[['tracks','Songs'],['albums','Albums'],['playlists','Playlists']];
+ for(const g of groups){
+  const key=g[0],label=g[1],items=d[key]||[];
+  if(!items.length)continue;any=true;
+  const h=document.createElement('div');h.className='grp';h.textContent=label;dd.appendChild(h);
+  items.forEach(x=>{
+   const r=document.createElement('div');r.className='row';
+   const img=document.createElement('img');if(x.art)img.src=x.art;
+   const t=document.createElement('div');t.className='t';
+   const n=document.createElement('div');n.className='n';n.textContent=x.name||'';
+   const s=document.createElement('div');s.className='s';
+   s.textContent=key==='tracks'?((x.artists||'')+' · '+(x.album||'')):(x.artists||x.owner||'');
+   t.appendChild(n);t.appendChild(s);r.appendChild(img);r.appendChild(t);
+   r.onclick=async()=>{
+    dd.style.display='none';$m('mQ').value='';mMsg('');
+    const resp=await mApi('/api/play_uri',{uri:x.uri});
+    mMsg(resp.ok?(resp.message||'Playing.'):resp.error,!resp.ok);
+    setTimeout(mPoll,1200);
+   };
+   dd.appendChild(r);
+  });
+ }
+ if(!any){const e2=document.createElement('div');e2.className='none';e2.textContent='no matches';dd.appendChild(e2);}
+ dd.style.display='block';
+}
+$m('mQ').addEventListener('input',()=>{clearTimeout(mSearchT);mSearchT=setTimeout(mDoSearch,350);});
+$m('mQ').addEventListener('keydown',e=>{
+ if(e.key==='Enter'){clearTimeout(mSearchT);mDoSearch();}
+ if(e.key==='Escape'){$m('mDrop').style.display='none';}});
+document.addEventListener('click',e=>{
+ if(!e.target.closest('#mSearch'))$m('mDrop').style.display='none';});
 setInterval(mPoll,3000);
 mPoll();mLoadDevices();
 </script></body></html>"""
@@ -482,6 +537,28 @@ class DashboardServer:
                 except Exception as e:
                     return JSONResponse({"ok": False, "error": str(e)})
 
+            async def api_search(request):
+                try:
+                    q = str(request.query_params.get("q", "")).strip()[:200]
+                    if not q:
+                        return JSONResponse({"ok": False, "error": "empty query"}, status_code=400)
+                    res = await asyncio.to_thread(spc.search_raw, q)
+                    return JSONResponse({"ok": True, **res})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
+            async def api_play_uri(request):
+                try:
+                    body = await request.json()
+                    uri = str(body.get("uri", ""))
+                    device = str(body.get("device", "") or "")
+                    if not uri:
+                        return JSONResponse({"ok": False, "error": "missing uri"}, status_code=400)
+                    msg = await asyncio.to_thread(spc.play_uri, uri, device or None)
+                    return JSONResponse({"ok": True, "message": msg})
+                except Exception as e:
+                    return JSONResponse({"ok": False, "error": str(e)})
+
             app = Starlette(routes=[
                 Route("/", index),
                 Route("/events", events),
@@ -494,6 +571,8 @@ class DashboardServer:
                 Route("/api/play", api_play, methods=["POST"]),
                 Route("/api/devices", api_devices),
                 Route("/api/transfer", api_transfer, methods=["POST"]),
+                Route("/api/search", api_search),
+                Route("/api/play_uri", api_play_uri, methods=["POST"]),
             ])
             config = uvicorn.Config(app, host=Config.DASHBOARD_HOST, port=self.port,
                                     log_level="warning", loop="asyncio")

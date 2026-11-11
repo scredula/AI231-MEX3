@@ -292,3 +292,57 @@ def transfer(device_id: str) -> str:
     """Move playback to a specific Connect device (no forced play)."""
     _handle(lambda: _sp().transfer_playback(device_id, force_play=False))
     return "Playback moved."
+
+
+def search_raw(query: str, limit: int = 5) -> dict:
+    """Top matches across tracks, albums and playlists for the web-UI dropdown."""
+    sp = _sp()
+    out = {"tracks": [], "albums": [], "playlists": []}
+    try:
+        res = _handle(lambda: sp.search(q=query, type="track", limit=limit))
+        for t in res.get("tracks", {}).get("items", []):
+            out["tracks"].append({
+                "uri": t["uri"],
+                "name": t.get("name"),
+                "artists": ", ".join(a.get("name", "") for a in t.get("artists", [])),
+                "album": t.get("album", {}).get("name"),
+                "art": (t.get("album", {}).get("images") or [{}])[0].get("url"),
+                "duration_ms": t.get("duration_ms") or 0,
+            })
+    except Exception as e:
+        log.warning(f"track search failed: {e}")
+    try:
+        res = _handle(lambda: sp.search(q=query, type="album", limit=limit))
+        for a in res.get("albums", {}).get("items", []):
+            out["albums"].append({
+                "uri": a.get("uri"),
+                "name": a.get("name"),
+                "artists": ", ".join(x.get("name", "") for x in a.get("artists", [])),
+                "art": (a.get("images") or [{}])[0].get("url"),
+            })
+    except Exception as e:
+        log.warning(f"album search failed: {e}")
+    try:
+        res = _handle(lambda: sp.search(q=query, type="playlist", limit=limit))
+        for p in res.get("playlists", {}).get("items", []):
+            if not p:
+                continue
+            out["playlists"].append({
+                "uri": p.get("uri"),
+                "name": p.get("name"),
+                "owner": (p.get("owner") or {}).get("display_name"),
+                "art": (p.get("images") or [{}])[0].get("url"),
+            })
+    except Exception as e:
+        log.warning(f"playlist search failed: {e}")
+    return out
+
+
+def play_uri(uri: str, device_hint: str | None = None) -> str:
+    """Start playback of a specific URI (track, album or playlist)."""
+    sp = _sp()
+    dev = _ensure_device(device_hint)
+    _handle(lambda: sp.start_playback(device_id=dev["id"] if dev else None,
+                                      uris=[uri] if uri.startswith("spotify:track") else None,
+                                      context_uri=uri if not uri.startswith("spotify:track") else None))
+    return "Playing selection."
