@@ -135,6 +135,18 @@ def search_and_play(query: str, device_hint: str | None = None) -> str:
     dev = _ensure_device(device_hint)
     _handle(lambda: sp.start_playback(device_id=dev["id"] if dev else None,
                                       uris=[track["uri"]]))
+    # Single-track contexts have no queue: 'next' would just restart the same
+    # track and the device pauses. Queue the rest of the album so next/previous
+    # walk the collection naturally.
+    try:
+        album_id = track.get("album", {}).get("id")
+        if album_id:
+            album = _handle(lambda: sp.album_tracks(album_id, limit=50))
+            album_uris = [t["uri"] for t in album.get("items", []) if t["uri"] != track["uri"]]
+            for uri in album_uris:
+                _handle(lambda: sp.add_to_queue(uri, device_id=dev["id"] if dev else None))
+    except Exception as e:
+        log.warning(f"could not queue album context after single-track play: {e}")
     artists = ", ".join(a["name"] for a in track["artists"])
     return (f"Playing {track['name']} by {artists} on "
             f"{(dev or {}).get('name', 'Spotify')}.")
@@ -171,9 +183,18 @@ def resume(device_hint: str | None = None) -> str:
     return "Resumed."
 
 
+def _resume_if_paused() -> None:
+    """After a skip, Spotify Connect devices can land paused (empty queue)."""
+    cp = _handle(lambda: _sp().current_playback())
+    if cp and not cp.get("is_playing"):
+        _handle(lambda: _sp().start_playback())
+
+
 def next_track() -> str:
     _handle(lambda: _sp().next_track())
     time.sleep(0.6)
+    _resume_if_paused()
+    time.sleep(0.4)
     cp = _handle(lambda: _sp().current_playback())
     name = ((cp or {}).get("item") or {}).get("name", "next track")
     return f"Next: {name}."
@@ -181,6 +202,8 @@ def next_track() -> str:
 
 def previous_track() -> str:
     _handle(lambda: _sp().previous_track())
+    time.sleep(0.6)
+    _resume_if_paused()
     return "Previous track."
 
 
