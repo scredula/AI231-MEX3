@@ -27,7 +27,7 @@ header h1{font-size:15px;margin:0;color:#9ecbff}
 .dot{width:8px;height:8px;border-radius:50%;background:#666;display:inline-block;margin-right:5px}
 .dot.live{background:#5fbf6f}.dot.err{background:#e06c5f}
 #status{font-size:12px;color:#8b93a7}
-#tabs{display:none;margin-left:auto;gap:6px}
+#tabs{display:flex;margin-left:auto;gap:6px}
 #tabs button{background:#1c2130;color:#aab;padding:4px 10px;border:1px solid #2a2f3c;border-radius:6px;font-size:12px}
 #tabs button.on{color:#e6e6e6;border-color:#4a5a8a}
 main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
@@ -84,16 +84,12 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
 #mVol{display:flex;gap:8px;align-items:center;color:#8b93a7}
 #mVol input{flex:1;accent-color:#4a7dd6}
 #mDev{background:#12151d;color:#e6e6e6;border:1px solid #2a2f3c;border-radius:8px;padding:8px;font:inherit}
-#mSearch{display:flex;gap:6px}
-#mSearch input{flex:1;background:#12151d;border:1px solid #2a2f3c;color:#e6e6e6;border-radius:8px;padding:8px 10px;font:inherit}
-#mSearch select{background:#12151d;color:#e6e6e6;border:1px solid #2a2f3c;border-radius:8px;font:inherit}
-#mSearch button{background:#2f5fa8;border:0;color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer}
 #mMsg{color:#8fd694;font-size:12px;min-height:16px;text-align:center;word-break:break-word}
 #mErr{min-height:0}
-@media (max-width:900px){main{flex-direction:column}#tabs{display:flex}#conv.hide,#act.hide{display:none}#conv,#act{flex:1}}
+@media (max-width:900px){main{flex-direction:column}#conv,#act{flex:1}}
 </style></head>
 <body>
-<header><h1>voice-agent</h1>
+<header><h1>Sonny's Voice Agent</h1>
  <span id="status"><span class="dot" id="dot"></span>connecting…</span>
  <div id="tabs"><button data-p="conv" class="on">Chat</button><button data-p="act">Activity</button><button data-p="music">Music</button></div>
 </header>
@@ -121,11 +117,6 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
    </div>
    <div id="mVol"><span>🔊</span><input id="mVolR" type="range" min="0" max="100" value="50"></div>
    <select id="mDev"><option value="">device…</option></select>
-   <div id="mSearch">
-    <input id="mQ" placeholder="search and play…">
-    <select id="mKind"><option value="track">song</option><option value="album">album</option><option value="artist">artist</option><option value="playlist">playlist</option></select>
-    <button id="mGo" title="play">▶</button>
-   </div>
    <div id="mMsg"></div>
   </div>
  </section>
@@ -211,8 +202,7 @@ function showOnlyMobile(p){
  tabs.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.p===p));}
 tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{showOnlyMobile(b.dataset.p);
  if(b.dataset.p==='music'){mPoll();mLoadDevices();}});
-if(innerWidth>900){document.getElementById('act').style.display='flex';}
-else{showOnlyMobile('conv');}
+showOnlyMobile('conv');
 /* agent state */
 function state(s){document.getElementById('agentState').textContent=s?'· '+s:'';}
 /* ---- events ---- */
@@ -335,12 +325,6 @@ async function mLoadDevices(){
  if(!d.devices.length){const o=document.createElement('option');o.value='';o.text='no devices';dd.appendChild(o);return;}
  d.devices.forEach(x=>{const o=document.createElement('option');o.value=x.id;
   o.text=x.name+(x.active?' · active':'');dd.appendChild(o);});}
-async function mPlayQuery(){
- const q=$m('mQ').value.trim();if(!q)return;mMsg('');
- const d=await mApi('/api/play',{query:q,kind:$m('mKind').value});
- mMsg(d.ok?(d.message||'Now playing.'):d.error,!d.ok);setTimeout(mPoll,1500);}
-$m('mGo').onclick=mPlayQuery;
-$m('mQ').addEventListener('keydown',e=>{if(e.key==='Enter')mPlayQuery();});
 $m('mDev').addEventListener('change',async()=>{
  const id=$m('mDev').value;if(!id)return;
  const d=await mApi('/api/transfer',{device_id:id});
