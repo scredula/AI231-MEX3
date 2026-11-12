@@ -249,19 +249,22 @@ class DashboardObserver:
             self._emit({"type": "announcement", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed, "text": str(frame.text)[:300]})
         elif isinstance(frame, MetricsFrame):
-            # pipecat reports LLM token usage (requested via include_usage from
-            # OpenRouter) inside MetricsFrame; last one per turn wins.
+            # pipecat reports LLM token usage (requested via usage.include from
+            # OpenRouter) inside MetricsFrame as LLMUsageMetricsData(value=
+            # LLMTokenUsage); last one per turn wins.
             try:
-                from pipecat.metrics.metrics import LLMTokenUsage
-                usages = [d for d in frame.data if isinstance(d, LLMTokenUsage)]
+                from pipecat.metrics.metrics import LLMTokenUsage, LLMUsageMetricsData
+                usages = [d.value for d in frame.data
+                          if isinstance(d, LLMUsageMetricsData)
+                          and isinstance(d.value, LLMTokenUsage)]
                 if usages:
                     u = usages[-1]
                     self._emit({"type": "token_usage", "turn": t.turn_id, "t_ms": tms,
-                                "model": Config.FAST_MODEL,
+                                "model": getattr(u, "model", None) or Config.FAST_MODEL,
                                 "prompt_tokens": u.prompt_tokens,
                                 "completion_tokens": u.completion_tokens,
                                 "total_tokens": u.total_tokens,
-                                "cached_tokens": getattr(u, "cached_tokens", None),
+                                "cached_tokens": getattr(u, "cache_read_input_tokens", None),
                                 "reasoning_tokens": getattr(u, "reasoning_tokens", None)})
             except Exception:
                 pass
