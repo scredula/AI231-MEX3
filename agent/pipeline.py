@@ -428,6 +428,18 @@ class VoicePipelineAgent:
             except spc.SpotifyError as e:
                 await params.result_callback(f"couldn't set volume: {e}")
 
+        async def dashboard_info(params: FunctionCallParams) -> None:
+            """Tell the user how to connect to the web dashboard.
+
+            Returns the dashboard URL (IP + port), the Wi-Fi network (SSID)
+            this device is currently on, and the hostname. Use whenever the
+            user asks how to reach the dashboard, what its address or IP is,
+            or which network the device is connected to.
+            """
+            from services.netinfo import dashboard_info as _info
+            await params.result_callback(
+                await asyncio.get_event_loop().run_in_executor(None, _info))
+
         async def now_playing(params: FunctionCallParams) -> None:
             """Report what Spotify is playing right now."""
             from services import spotify_client as spc
@@ -513,7 +525,7 @@ class VoicePipelineAgent:
         context = LLMContext([system], tools=[submit_task, task_status, task_cancel, build_website,
                                               get_time, search_web, get_weather, create_file,
                                               set_reminder, list_reminders, add_note, read_notes,
-                                              system_stats, send_telegram,
+                                              system_stats, send_telegram, dashboard_info,
                                               play_music, pause_music, resume_music,
                                               skip_track, set_music_volume, now_playing,
                                               edit_file, read_file, run_command])
