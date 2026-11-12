@@ -148,7 +148,7 @@ class VoicePipelineAgent:
         from pipecat.audio.vad.silero import SileroVADAnalyzer
         from pipecat.frames.frames import TTSSpeakFrame
         from pipecat.pipeline.pipeline import Pipeline
-        from pipecat.pipeline.worker import PipelineWorker
+        from pipecat.pipeline.worker import PipelineParams, PipelineWorker
         from pipecat.workers.runner import WorkerRunner
         from pipecat.processors.aggregators.llm_context import LLMContext
         from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
@@ -562,7 +562,8 @@ class VoicePipelineAgent:
             *( [tts_tap] if tts_tap else [] ),
             transport.output(),
         ])
-        worker = PipelineWorker(pipeline, observers=[observer.pipecat_observer()])
+        worker = PipelineWorker(pipeline, observers=[observer.pipecat_observer()],
+                                params=PipelineParams(enable_usage_metrics=True))
         observer.echo_gate = echo_gate   # gate mutes mic while bot speaks
         observer.echo_detector = echo_detector  # feeds bot text for echo matching
 

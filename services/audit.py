@@ -135,15 +135,20 @@ class Audit:
             # traversal, so identical payloads can be published twice within
             # milliseconds (the dashboard masks this with seen-keys). The
             # audit must not record doubles: drop a repeat of the same
-            # (type, turn, payload) within the recent window.
+            # (type, turn, payload) within the recent window. Timing fields
+            # differ between traversals, so they are excluded from the key;
+            # llm_delta is never suppressed (two identical tokens in a row are
+            # legitimate speech, not duplicates).
+            skip = {"ts", "t_ms", "mono", "seq", "session", "duration", "latencies"}
             body = json.dumps({k: v for k, v in ev.items()
-                               if k not in ("ts", "t_ms", "mono", "seq", "session")},
+                               if k not in skip and not (isinstance(k, str) and k.endswith("_ms"))},
                               sort_keys=True, ensure_ascii=False, default=str)
-            key = (ev.get("type"), ev.get("turn"),
-                   hashlib.sha256(body[:2000].encode("utf-8")).hexdigest()[:16])
-            if key in self._recent:
-                return None
-            self._recent.append(key)
+            if ev.get("type") != "llm_delta":
+                key = (ev.get("type"), ev.get("turn"),
+                       hashlib.sha256(body[:2000].encode("utf-8")).hexdigest()[:16])
+                if key in self._recent:
+                    return None
+                self._recent.append(key)
             self._seq += 1
             ev["seq"] = self._seq
             ev["session"] = self.session
