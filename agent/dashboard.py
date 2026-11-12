@@ -120,12 +120,27 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
 #mQList .crow .cd{color:#5a6070;font-size:11px;flex:none}
 #mQList .empty{color:#79839a;font-size:12px;padding:8px 10px;text-align:center}
 #mErr{min-height:0}
+/* audit trail */
+#aCtl{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid #2a2f3c;flex-wrap:wrap;align-items:center}
+#aCtl select,#aCtl input,#aCtl button{background:#1c2130;color:#cfd6e4;border:1px solid #2a2f3c;border-radius:6px;padding:4px 8px;font-size:12px}
+#aCtl button{cursor:pointer}#aCtl button:hover{border-color:#4a5a8a;color:#e6e6e6}
+#aMeta{font-size:11px;color:#79839a;padding:4px 12px 0}
+#aList .arow{background:#1c2130;border:1px solid #2a2f3c;border-radius:8px;margin:5px 0;font-size:12px;overflow:hidden}
+#aList .arow summary{cursor:pointer;padding:6px 10px;display:flex;gap:8px;align-items:baseline;list-style:none}
+#aList .arow summary::-webkit-details-marker{display:none}
+#aList .at{color:#5a6070;font-size:11px;flex:none}
+#aList .aturn{color:#79839a;font-size:11px;flex:none;min-width:34px}
+#aList .atype{color:#9ecbff;font-weight:600;flex:none;min-width:110px}
+#aList .atype.err{color:#ff9a8a}.atype.warn{color:#f0c674}
+#aList .asum{color:#aab2c4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+#aList .apre{margin:0;padding:6px 10px;border-top:1px solid #2a2f3c;background:#12151d;color:#9aa4bd;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:280px;overflow-y:auto}
+#aList .empty{color:#79839a;font-size:12px;padding:14px;text-align:center}
 @media (max-width:900px){main{flex-direction:column}#conv,#act{flex:1}}
 </style></head>
 <body>
 <header><h1>Sonny's Voice Agent</h1>
  <span id="status"><span class="dot" id="dot"></span>connecting…</span>
- <div id="tabs"><button data-p="conv" class="on">Chat</button><button data-p="act">Activity</button><button data-p="music">Music</button></div>
+ <div id="tabs"><button data-p="conv" class="on">Chat</button><button data-p="act">Activity</button><button data-p="music">Music</button><button data-p="audit">Audit</button></div>
 </header>
 <main>
  <section class="panel" id="conv"><h2>Conversation <span id="agentState"></span></h2>
@@ -161,6 +176,19 @@ main{flex:1;display:flex;min-height:0;padding:10px;gap:10px}
    <div id="mQTitle">Up next</div>
    <div id="mQList"></div>
   </div>
+ </section>
+ <section class="panel" id="audit"><h2>Audit trail</h2>
+  <div id="aCtl">
+   <select id="aDate" title="audit date"></select>
+   <select id="aType"><option value="">all types</option></select>
+   <select id="aTool"><option value="">all tools</option></select>
+   <input id="aTurn" type="number" min="1" placeholder="turn #" style="width:70px">
+   <input id="aQ" placeholder="search…" style="flex:1;min-width:90px">
+   <button id="aGo">Apply</button>
+   <label style="white-space:nowrap;font-size:11px;color:#8b93a7"><input type="checkbox" id="aLive"> live</label>
+  </div>
+  <div id="aMeta"></div>
+  <div class="scroll" id="aList"></div>
  </section>
 </main>
 <script>
@@ -238,13 +266,76 @@ function turnRoot(ev,text){
 function evtInfo(ev,ok){const pre=evtCard(ev,ev.arguments||'',ok);pre.textContent=toolDetails(ev,ok);feed2.scrollTop=feed2.scrollHeight;}
 /* tabs (mobile) */
 const tabs=document.getElementById('tabs');
-const PANELS=['conv','act','music'];
+const PANELS=['conv','act','music','audit'];
 function showOnlyMobile(p){
  PANELS.forEach(id=>{document.getElementById(id).style.display=id===p?'flex':'none';});
  tabs.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.p===p));}
 tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{showOnlyMobile(b.dataset.p);
- if(b.dataset.p==='music'){mPoll();mLoadDevices();}});
+ if(b.dataset.p==='music'){mPoll();mLoadDevices();}
+ if(b.dataset.p==='audit'){aInit();}});
 showOnlyMobile('conv');
+/* ---- audit trail ---- */
+let aInited=false,aTimer=null;
+function aInit(){if(aInited){aLoad();return;}aInited=true;
+ fetch('/api/audit_dates').then(r=>r.json()).then(d=>{
+  const sel=document.getElementById('aDate');sel.innerHTML='';
+  (d.dates||[]).slice().reverse().forEach(x=>{const o=document.createElement('option');o.value=x.date;
+   o.textContent=x.date+' ('+(x.bytes>1048576?(x.bytes/1048576).toFixed(1)+'MB':Math.max(1,Math.round(x.bytes/1024))+'KB')+')';sel.appendChild(o);});
+  aLoad();
+ }).catch(()=>{document.getElementById('aList').textContent='audit not available';});}
+function aParams(){const p=new URLSearchParams();
+ p.set('date',document.getElementById('aDate').value||new Date().toISOString().slice(0,10));
+ const t=document.getElementById('aType').value;if(t)p.set('type',t);
+ const tl=document.getElementById('aTool').value;if(tl)p.set('tool',tl);
+ const tn=document.getElementById('aTurn').value;if(tn)p.set('turn',tn);
+ const q=document.getElementById('aQ').value.trim();if(q)p.set('q',q);
+ return p;}
+function fillFacet(id,pairs,allLabel){const sel=document.getElementById(id);const cur=sel.value;
+ sel.innerHTML='';const base=document.createElement('option');base.value='';base.textContent=allLabel;sel.appendChild(base);
+ pairs.forEach(pair=>{const o=document.createElement('option');o.value=pair[0];o.textContent=pair[0]+' ('+pair[1]+')';sel.appendChild(o);});
+ if(cur&&pairs.some(pair=>pair[0]===cur))sel.value=cur;}
+function aSum(ev){switch(ev.type){
+ case 'transcript':return 'user: '+ev.text;
+ case 'turn_end':return 'reply: '+(ev.assistant_text||'').slice(0,120);
+ case 'llm_request':{const ms=ev.messages||[];const nu=ms.filter(m=>m.c!=null).length;
+  return (ev.model||'?')+' · '+ms.length+' ctx msgs ('+nu+' new) · last ctx '+((ms[ms.length-1]||{}).h||'');}
+ case 'first_token':return ev.model+(ev.elapsed_ms!=null?' · first token in '+ev.elapsed_ms+'ms':'');
+ case 'token_usage':return (ev.model||'?')+' · '+ev.prompt_tokens+' in / '+ev.completion_tokens+' out'+(ev.cached_tokens?' · cached '+ev.cached_tokens:'');
+ case 'tool_calls_started':return ((ev._names)||(ev.calls||[]).map(c=>c.name)).join(', ');
+ case 'tool_running':return ev.name+' · args '+String(ev.arguments||'').slice(0,90);
+ case 'tool_result':return (ev.ok?'ok: ':'FAIL: ')+ev.name+' · '+Math.round((ev.duration||0)*1000)+'ms · '+String(ev.result||'').slice(0,90);
+ case 'announcement':return 'announcement: '+ev.text;
+ case 'interruption':return 'barge-in after '+ev.playing_ms+'ms of playback';
+ case 'speech_start':return 'user speaking…';
+ case 'speech_end':return 'user stopped ('+(ev.speech_ms||0)+'ms)';
+ case 'error':case 'log_error':return (ev.logger?ev.logger+': ':'')+String(ev.error||'').slice(0,140);
+ case 'turn_start':return 'turn begins';
+ default:return '';}}
+function aRow(ev){const det=document.createElement('details');det.className='arow';
+ const s=document.createElement('summary');
+ const span=(cls,txt)=>{const el=document.createElement('span');el.className=cls;el.textContent=txt;return el;};
+ s.appendChild(span('at',(ev.ts||'').slice(11,19)));
+ s.appendChild(span('aturn','#'+ev.turn));
+ s.appendChild(span('atype'+(ev.type==='error'||ev.type==='log_error'?' err':''),ev.type));
+ s.appendChild(span('asum',aSum(ev)));
+ det.appendChild(s);
+ const pre=document.createElement('pre');pre.className='apre';pre.textContent=JSON.stringify(ev,null,1);det.appendChild(pre);
+ return det;}
+function aLoad(){const p=aParams();
+ fetch('/api/audit?'+p).then(r=>r.json()).then(d=>{
+  if(d.error){document.getElementById('aMeta').textContent='error: '+d.error;return;}
+  fillFacet('aType',Object.entries(d.types||{}).sort((a,b)=>b[1]-a[1]),'all types');
+  fillFacet('aTool',Object.entries(d.tools||{}).sort((a,b)=>b[1]-a[1]),'all tools');
+  document.getElementById('aMeta').textContent=d.total+' matching · showing '+d.events.length+
+   ' (oldest first)'+(document.getElementById('aLive').checked?' · following live':'');
+  const list=document.getElementById('aList');list.innerHTML='';
+  if(!d.events.length){const e=document.createElement('div');e.className='empty';e.textContent='no events match';list.appendChild(e);return;}
+  d.events.forEach(ev=>list.appendChild(aRow(ev)));
+ }).catch(err=>{document.getElementById('aMeta').textContent='fetch failed: '+err;});}
+document.getElementById('aGo').onclick=aLoad;
+['aQ','aTurn'].forEach(id=>document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')aLoad();}));
+document.getElementById('aLive').addEventListener('change',()=>{if(aTimer){clearInterval(aTimer);aTimer=null;}
+ if(document.getElementById('aLive').checked)aTimer=setInterval(aLoad,3000);});
 /* agent state */
 function state(s){document.getElementById('agentState').textContent=s?'· '+s:'';}
 /* ---- events ---- */
@@ -482,9 +573,10 @@ mPoll();mLoadDevices();
 
 
 class DashboardServer:
-    def __init__(self, bus: EventBus, port: int = None, say_handler=None):
+    def __init__(self, bus: EventBus, port: int = None, say_handler=None, audit=None):
         self.bus = bus
         self.say_handler = say_handler  # callable(text) -> async, injects user text into the agent
+        self.audit = audit              # services.audit.Audit — JSONL trail reader
         self.port = port or int(Config.DASHBOARD_PORT or 8900)
         self._thread: threading.Thread = None
 
@@ -543,6 +635,31 @@ class DashboardServer:
                 except Exception as e:
                     return JSONResponse({"error": str(e)}, status_code=500)
                 return JSONResponse({"ok": True})
+
+            # ---- audit trail API (reads services/audit JSONL files) ----
+            async def api_audit_dates(request):
+                if not self.audit:
+                    return JSONResponse({"dates": []})
+                return JSONResponse({"dates": await asyncio.to_thread(self.audit.dates)})
+
+            async def api_audit(request):
+                if not self.audit:
+                    return JSONResponse({"events": [], "total": 0, "types": {}, "tools": {}})
+                qp = request.query_params
+                turn = qp.get("turn")
+                try:
+                    result = await asyncio.to_thread(
+                        self.audit.query,
+                        date=qp.get("date") or None,
+                        type_=qp.get("type") or None,
+                        tool=qp.get("tool") or None,
+                        turn=int(turn) if turn else None,
+                        q=qp.get("q") or None,
+                        limit=min(int(qp.get("limit", "400")), 2000),
+                        offset=max(int(qp.get("offset", "0")), 0))
+                except Exception as e:
+                    return JSONResponse({"error": str(e)}, status_code=500)
+                return JSONResponse(result)
 
             # ---- music player API (wraps services.spotify_client) ----
             from services import spotify_client as spc
@@ -685,6 +802,8 @@ class DashboardServer:
                 Route("/events", events),
                 Route("/api/events", history),
                 Route("/say", say, methods=["POST"]),
+                Route("/api/audit", api_audit),
+                Route("/api/audit_dates", api_audit_dates),
                 Route("/api/now_playing", api_now_playing),
                 Route("/api/player", api_player, methods=["POST"]),
                 Route("/api/volume", api_volume, methods=["POST"]),

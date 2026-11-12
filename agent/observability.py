@@ -19,7 +19,7 @@ from agent.config import Config
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame, BotStoppedSpeakingFrame, ErrorFrame,
     FunctionCallInProgressFrame, FunctionCallResultFrame, FunctionCallsStartedFrame,
-    InterruptionFrame, LLMTextFrame, TranscriptionFrame, TTSSpeakFrame,
+    InterruptionFrame, LLMTextFrame, MetricsFrame, TranscriptionFrame, TTSSpeakFrame,
     UserStartedSpeakingFrame, UserStoppedSpeakingFrame,
 )
 
@@ -248,6 +248,23 @@ class DashboardObserver:
                 self.echo_detector._state.add_bot_text(str(frame.text))
             self._emit({"type": "announcement", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed, "text": str(frame.text)[:300]})
+        elif isinstance(frame, MetricsFrame):
+            # pipecat reports LLM token usage (requested via include_usage from
+            # OpenRouter) inside MetricsFrame; last one per turn wins.
+            try:
+                from pipecat.metrics.metrics import LLMTokenUsage
+                usages = [d for d in frame.data if isinstance(d, LLMTokenUsage)]
+                if usages:
+                    u = usages[-1]
+                    self._emit({"type": "token_usage", "turn": t.turn_id, "t_ms": tms,
+                                "model": Config.FAST_MODEL,
+                                "prompt_tokens": u.prompt_tokens,
+                                "completion_tokens": u.completion_tokens,
+                                "total_tokens": u.total_tokens,
+                                "cached_tokens": getattr(u, "cached_tokens", None),
+                                "reasoning_tokens": getattr(u, "reasoning_tokens", None)})
+            except Exception:
+                pass
         elif isinstance(frame, ErrorFrame):
             self._emit({"type": "error", "turn": t.turn_id, "t_ms": tms,
                         "elapsed_ms": elapsed, "error": str(frame.error)[:300]})

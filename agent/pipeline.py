@@ -204,6 +204,16 @@ class VoicePipelineAgent:
         from agent.observability import DashboardObserver, ObservableLLMService
         bus = EventBus()
         self.bus = bus
+        # audit trail: durable JSONL sink for every bus event (secrets scrubbed,
+        # contexts deduped, daily files, 30-day rotation)
+        self.audit = None
+        try:
+            from services.audit import Audit, install_error_net
+            self.audit = Audit(bus=bus, audit_dir=Config.AUDIT_DIR,
+                               retain_days=Config.AUDIT_RETAIN_DAYS)
+            install_error_net(self.audit)
+        except Exception:
+            logging.getLogger("observability").exception("audit init failed — continuing without audit")
         observer = DashboardObserver(bus)
         llm._observer = observer
         llm.get_chat_completions = self._wrap_llm_get(llm)
@@ -578,7 +588,7 @@ class VoicePipelineAgent:
             an int crashes the RTVI turn-tracking observer's pydantic validation."""
             await worker.queue_frame(TranscriptionFrame(text, "", "0"))
 
-        dashboard = DashboardServer(bus, say_handler=say)
+        dashboard = DashboardServer(bus, say_handler=say, audit=self.audit)
         dashboard.start()
         log.info("conversation dashboard: %s", dashboard.url())
 

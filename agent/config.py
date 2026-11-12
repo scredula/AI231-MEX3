@@ -39,6 +39,9 @@ class Config:
     # Paths
     WORKSPACE_DIR = ROOT / _env("WORKSPACE_DIR", "workspace")
     TASKS_DB_PATH = ROOT / _env("TASKS_DB_PATH", "data/tasks.json")
+    # Audit trail (append-only JSONL, daily files)
+    AUDIT_DIR = ROOT / _env("AUDIT_DIR", "data/audit")
+    AUDIT_RETAIN_DAYS = int(_env("AUDIT_RETAIN_DAYS", "30"))
 
     # Audio
     AUDIO_INPUT_DEVICE = _env("AUDIO_INPUT_DEVICE") or None
@@ -104,3 +107,4 @@ class Config:
     def ensure_dirs(cls) -> None:
         cls.WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
         cls.TASKS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        cls.AUDIT_DIR.mkdir(parents=True, exist_ok=True)
