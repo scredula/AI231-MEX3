@@ -28,6 +28,7 @@ import re
 import threading
 import time
 import uuid
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -98,6 +99,7 @@ class Audit:
         self._seq = 0
         self._turn = 0
         self._seen: dict[str, bool] = {}      # content hash -> True (per session)
+        self._recent: deque = deque(maxlen=256)  # (type, turn, payload-hash) dup guard
         self._q = bus.subscribe()             # writer thread pumps this queue
         self._fh = None
         self._fh_date = None
@@ -129,6 +131,19 @@ class Audit:
     def _render(self, ev: dict):
         try:
             ev = dict(ev)
+            # The pipecat observer sees each frame on more than one pipeline
+            # traversal, so identical payloads can be published twice within
+            # milliseconds (the dashboard masks this with seen-keys). The
+            # audit must not record doubles: drop a repeat of the same
+            # (type, turn, payload) within the recent window.
+            body = json.dumps({k: v for k, v in ev.items()
+                               if k not in ("ts", "t_ms", "mono", "seq", "session")},
+                              sort_keys=True, ensure_ascii=False, default=str)
+            key = (ev.get("type"), ev.get("turn"),
+                   hashlib.sha256(body[:2000].encode("utf-8")).hexdigest()[:16])
+            if key in self._recent:
+                return None
+            self._recent.append(key)
             self._seq += 1
             ev["seq"] = self._seq
             ev["session"] = self.session

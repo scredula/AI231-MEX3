@@ -196,7 +196,13 @@ class VoicePipelineAgent:
                                base_url=Config.OPENROUTER_BASE_URL,
                                settings=OpenAILLMService.Settings(
                                    model=Config.FAST_MODEL,
-                                   extra={"extra_body": {"reasoning": _reasoning_body()}} if Config.REASONING_EXCLUDE or Config.REASONING_EFFORT else {}))
+                                   # OpenRouter ignores stream_options.include_usage;
+                                   # its own usage.accounting flag returns real token
+                                   # counts in the final chunk -> audited as token_usage.
+                                   extra={"extra_body": {
+                                       "usage": {"include": True},
+                                       **({"reasoning": _reasoning_body()} if (Config.REASONING_EXCLUDE or Config.REASONING_EFFORT) else {}),
+                                   }}))
         tts = self._make_tts_service(transport_sample_rate=24000)
         tts_norm = TTSTextNormalizer()
 
